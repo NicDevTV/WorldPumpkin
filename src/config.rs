@@ -1,7 +1,6 @@
 // Copyright (c) 2026 NicDevTV
 // SPDX-License-Identifier: MIT
 
-use serde::{Deserialize, Serialize};
 use std::{
     fs,
     path::{Path, PathBuf},
@@ -62,8 +61,7 @@ pub const PERMISSION_NODES: &[PermissionNode] = &[
     },
 ];
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(default)]
+#[derive(Clone, Debug)]
 pub struct Config {
     pub max_blocks_per_operation: u64,
     pub blocks_per_tick: usize,
@@ -110,7 +108,7 @@ impl Config {
 
         let raw = fs::read_to_string(&config_path)
             .map_err(|err| format!("failed to read {}: {err}", config_path.display()))?;
-        let config: Self = toml::from_str(&raw)
+        let config = parse_config(&raw)
             .map_err(|err| format!("failed to parse {}: {err}", config_path.display()))?;
         config.validate()?;
         let normalized = config_toml(&config)?;
@@ -150,12 +148,82 @@ fn write_config(path: &Path, config: &Config) -> Result<(), String> {
 }
 
 fn config_toml(config: &Config) -> Result<String, String> {
-    toml::to_string_pretty(config).map_err(|err| format!("failed to serialize config: {err}"))
+    Ok(format!(
+        "\
+max_blocks_per_operation = {}
+blocks_per_tick = {}
+max_queued_operations = {}
+max_queued_blocks = {}
+max_history_entries = {}
+max_history_blocks = {}
+fast_mode = {}
+notify_clients = {}
+",
+        config.max_blocks_per_operation,
+        config.blocks_per_tick,
+        config.max_queued_operations,
+        config.max_queued_blocks,
+        config.max_history_entries,
+        config.max_history_blocks,
+        config.fast_mode,
+        config.notify_clients
+    ))
+}
+
+fn parse_config(raw: &str) -> Result<Config, String> {
+    let mut config = Config::default();
+
+    for (line_index, line) in raw.lines().enumerate() {
+        let line = line.split_once('#').map_or(line, |(value, _)| value).trim();
+        if line.is_empty() {
+            continue;
+        }
+
+        let Some((key, value)) = line.split_once('=') else {
+            return Err(format!("line {} is missing `=`", line_index + 1));
+        };
+        let key = key.trim();
+        let value = value.trim();
+
+        match key {
+            "max_blocks_per_operation" => config.max_blocks_per_operation = parse_u64(value, key)?,
+            "blocks_per_tick" => config.blocks_per_tick = parse_usize(value, key)?,
+            "max_queued_operations" => config.max_queued_operations = parse_usize(value, key)?,
+            "max_queued_blocks" => config.max_queued_blocks = parse_u64(value, key)?,
+            "max_history_entries" => config.max_history_entries = parse_usize(value, key)?,
+            "max_history_blocks" => config.max_history_blocks = parse_usize(value, key)?,
+            "fast_mode" => config.fast_mode = parse_bool(value, key)?,
+            "notify_clients" => config.notify_clients = parse_bool(value, key)?,
+            _ => {}
+        }
+    }
+
+    Ok(config)
+}
+
+fn parse_u64(value: &str, key: &str) -> Result<u64, String> {
+    value
+        .parse()
+        .map_err(|err| format!("failed to parse `{key}` as integer: {err}"))
+}
+
+fn parse_usize(value: &str, key: &str) -> Result<usize, String> {
+    value
+        .parse()
+        .map_err(|err| format!("failed to parse `{key}` as integer: {err}"))
+}
+
+fn parse_bool(value: &str, key: &str) -> Result<bool, String> {
+    match value {
+        "true" => Ok(true),
+        "false" => Ok(false),
+        _ => Err(format!("failed to parse `{key}` as bool")),
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{Config, PERMISSION_NODES, PERM_LIMIT_BYPASS};
+    use super::{parse_config, Config, PERMISSION_NODES, PERM_LIMIT_BYPASS};
 
     #[test]
     fn default_config_is_valid() {
@@ -172,7 +240,7 @@ mod tests {
 
     #[test]
     fn legacy_write_flags_are_ignored() {
-        let config: Config = toml::from_str(
+        let config = parse_config(
             r#"
 max_blocks_per_operation = 250000
 blocks_per_tick = 8192
@@ -192,6 +260,36 @@ skip_redstone_wire_state_replacement = true
 
         assert!(config.fast_mode);
         assert!(config.notify_clients);
+    }
+
+    #[test]
+    fn config_parser_keeps_defaults_for_missing_fields() {
+        let config = parse_config(
+            r#"
+blocks_per_tick = 4096
+notify_clients = false
+"#,
+        )
+        .unwrap();
+
+        assert_eq!(config.max_blocks_per_operation, Config::default().max_blocks_per_operation);
+        assert_eq!(config.blocks_per_tick, 4096);
+        assert!(!config.notify_clients);
+    }
+
+    #[test]
+    fn config_parser_accepts_comments_and_whitespace() {
+        let config = parse_config(
+            r#"
+            # WorldPumpkin config
+            max_history_entries = 7 # inline comment
+            fast_mode = false
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(config.max_history_entries, 7);
+        assert!(!config.fast_mode);
     }
 
     #[test]

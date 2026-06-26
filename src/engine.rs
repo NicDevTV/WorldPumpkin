@@ -497,11 +497,23 @@ pub fn parse_block_state(input: &str) -> Result<u16, String> {
     if let Ok(state_id) = trimmed.parse::<u16>() {
         return Ok(state_id);
     }
+    let trimmed = trimmed.strip_prefix("minecraft:").unwrap_or(trimmed);
+    let key = block_state_key(trimmed);
 
     generated_blocks::BLOCK_STATES
-        .binary_search_by_key(&trimmed, |(name, _)| *name)
+        .binary_search_by_key(&key, |(key, _)| *key)
         .map(|index| generated_blocks::BLOCK_STATES[index].1)
         .map_err(|_| format!("unknown block state `{input}`"))
+}
+
+fn block_state_key(input: &str) -> u64 {
+    const OFFSET: u64 = 0xcbf29ce484222325;
+    const PRIME: u64 = 0x100000001b3;
+
+    input
+        .as_bytes()
+        .iter()
+        .fold(OFFSET, |hash, byte| (hash ^ u64::from(*byte)).wrapping_mul(PRIME))
 }
 
 #[cfg(test)]
@@ -539,6 +551,14 @@ mod tests {
     #[test]
     fn block_parser_resolves_generated_property_state() {
         assert!(parse_block_state("oak_log[axis=x]").is_ok());
+    }
+
+    #[test]
+    fn block_parser_resolves_namespaced_property_state() {
+        assert_eq!(
+            parse_block_state("minecraft:oak_log[axis=x]").unwrap(),
+            parse_block_state("oak_log[axis=x]").unwrap()
+        );
     }
 
     #[test]
