@@ -12,6 +12,7 @@ pub const PERM_SET: &str = "WorldPumpkin:command.set";
 pub const PERM_REPLACE: &str = "WorldPumpkin:command.replace";
 pub const PERM_POS: &str = "WorldPumpkin:command.pos";
 pub const PERM_UNDO: &str = "WorldPumpkin:command.undo";
+pub const PERM_REDO: &str = "WorldPumpkin:command.redo";
 pub const PERM_RELOAD: &str = "WorldPumpkin:command.reload";
 pub const PERM_STATUS: &str = "WorldPumpkin:command.status";
 pub const PERM_LIMIT_BYPASS: &str = "WorldPumpkin:limit.bypass";
@@ -42,6 +43,11 @@ pub const PERMISSION_NODES: &[PermissionNode] = &[
     PermissionNode {
         node: PERM_UNDO,
         description: "Allows undoing WorldPumpkin edits.",
+        default_op: true,
+    },
+    PermissionNode {
+        node: PERM_REDO,
+        description: "Allows redoing WorldPumpkin edits.",
         default_op: true,
     },
     PermissionNode {

@@ -155,12 +155,28 @@ impl HistoryEntry {
 pub struct BlockChange {
     pos: BlockPos,
     old_state: u16,
+    new_state: u16,
 }
 
 pub enum EditKind {
-    Set { to: u16 },
-    Replace { from: u16, to: u16 },
-    Undo { history: HistoryEntry },
+    Set {
+        to: u16,
+    },
+    Replace {
+        from: u16,
+        to: u16,
+    },
+    Replay {
+        history: HistoryEntry,
+        direction: ReplayDirection,
+        next_index: usize,
+    },
+}
+
+#[derive(Clone, Copy)]
+pub enum ReplayDirection {
+    Undo,
+    Redo,
 }
 
 pub struct EditOperation {
@@ -219,7 +235,12 @@ impl EditOperation {
         }
     }
 
-    pub fn undo(owner: String, world: World, history: HistoryEntry) -> Self {
+    pub fn undo(
+        owner: String,
+        world: World,
+        history: HistoryEntry,
+        state: Arc<Mutex<PluginState>>,
+    ) -> Self {
         let world_id = world.get_id();
         let remaining = history.len() as u64;
         let cuboid = Cuboid::new(BlockPos { x: 0, y: 0, z: 0 }, BlockPos { x: 0, y: 0, z: 0 });
@@ -227,10 +248,40 @@ impl EditOperation {
             owner,
             world,
             world_id,
-            kind: EditKind::Undo { history },
+            kind: EditKind::Replay {
+                next_index: history.len(),
+                history,
+                direction: ReplayDirection::Undo,
+            },
             positions: cuboid.iter(),
             history: Vec::new(),
-            state: Arc::new(Mutex::new(PluginState::new(Config::default()))),
+            state,
+            remaining,
+            chunk_cursor: None,
+        }
+    }
+
+    pub fn redo(
+        owner: String,
+        world: World,
+        history: HistoryEntry,
+        state: Arc<Mutex<PluginState>>,
+    ) -> Self {
+        let world_id = world.get_id();
+        let remaining = history.len() as u64;
+        let cuboid = Cuboid::new(BlockPos { x: 0, y: 0, z: 0 }, BlockPos { x: 0, y: 0, z: 0 });
+        Self {
+            owner,
+            world,
+            world_id,
+            kind: EditKind::Replay {
+                history,
+                direction: ReplayDirection::Redo,
+                next_index: 0,
+            },
+            positions: cuboid.iter(),
+            history: Vec::new(),
+            state,
             remaining,
             chunk_cursor: None,
         }
@@ -239,14 +290,34 @@ impl EditOperation {
     fn pending_blocks(&self) -> u64 {
         match &self.kind {
             EditKind::Set { .. } | EditKind::Replace { .. } => self.remaining,
-            EditKind::Undo { history } => history.len() as u64,
+            EditKind::Replay {
+                history,
+                direction,
+                next_index,
+            } => match direction {
+                ReplayDirection::Undo => *next_index as u64,
+                ReplayDirection::Redo => history.len().saturating_sub(*next_index) as u64,
+            },
         }
     }
 
     fn process(&mut self, budget: usize, config: &Config) -> ProcessResult {
         let writer = WriteStrategy::new(config);
-        if let EditKind::Undo { history } = &mut self.kind {
-            return process_undo(&self.world, history, budget, &writer);
+        if let EditKind::Replay {
+            history,
+            direction,
+            next_index,
+        } = &mut self.kind
+        {
+            return process_replay(
+                &self.world,
+                history,
+                *direction,
+                next_index,
+                budget,
+                &writer,
+                &mut self.chunk_cursor,
+            );
         }
 
         match self.kind {
@@ -254,7 +325,34 @@ impl EditOperation {
             EditKind::Replace { from, to } => {
                 self.process_forward(budget, config, &writer, Some(from), to)
             }
-            EditKind::Undo { .. } => unreachable!("undo handled above"),
+            EditKind::Replay { .. } => unreachable!("history replay handled above"),
+        }
+    }
+
+    fn finish(&mut self) {
+        match &self.kind {
+            EditKind::Set { .. } | EditKind::Replace { .. } => {
+                let history =
+                    HistoryEntry::new(self.world_id.clone(), std::mem::take(&mut self.history));
+                if history.len() > 0 {
+                    self.state
+                        .lock()
+                        .unwrap()
+                        .push_undo_history(self.owner.clone(), history);
+                }
+            }
+            EditKind::Replay {
+                history, direction, ..
+            } => {
+                let history = history.clone();
+                let mut state = self.state.lock().unwrap();
+                match direction {
+                    ReplayDirection::Undo => state.push_redo_history(self.owner.clone(), history),
+                    ReplayDirection::Redo => {
+                        state.push_replayed_undo_history(self.owner.clone(), history)
+                    }
+                }
+            }
         }
     }
 
@@ -270,10 +368,6 @@ impl EditOperation {
 
         while visited < budget {
             let Some(pos) = self.positions.next() else {
-                self.state.lock().unwrap().push_history(
-                    self.owner.clone(),
-                    HistoryEntry::new(self.world_id.clone(), std::mem::take(&mut self.history)),
-                );
                 return ProcessResult::Finished { scanned: visited };
             };
 
@@ -282,7 +376,11 @@ impl EditOperation {
             if replace_from.is_none_or(|from| from == old_state) && old_state != to {
                 writer.set_block_state(&self.world, &mut self.chunk_cursor, pos, to);
                 if self.history.len() < config.max_history_blocks {
-                    self.history.push(BlockChange { pos, old_state });
+                    self.history.push(BlockChange {
+                        pos,
+                        old_state,
+                        new_state: to,
+                    });
                 }
             }
             self.remaining = self.remaining.saturating_sub(1);
@@ -302,18 +400,18 @@ impl EditQueue {
     pub fn can_enqueue(&self, blocks: u64, config: &Config) -> Result<(), String> {
         if self.queue.len() >= config.max_queued_operations {
             return Err(format!(
-                "Edit queue is full: {}/{} operations are queued.",
+                "Too many edits are already queued ({}/{}).",
                 self.queue.len(),
                 config.max_queued_operations
             ));
         }
 
         let Some(total_blocks) = self.queued_blocks.checked_add(blocks) else {
-            return Err("Edit queue block count overflowed.".to_owned());
+            return Err("Too many blocks are queued.".to_owned());
         };
         if total_blocks > config.max_queued_blocks {
             return Err(format!(
-                "Edit queue is full: {} queued blocks, {blocks} new blocks, limit is {}.",
+                "Too many blocks are already queued: {} queued, {blocks} new, limit is {}.",
                 self.queued_blocks, config.max_queued_blocks
             ));
         }
@@ -349,7 +447,9 @@ impl EditQueue {
         let result = operation.process(budget, config);
         self.queued_blocks = self.queued_blocks.saturating_sub(result.scanned());
         if result.is_finished() {
-            self.queue.pop_front();
+            if let Some(mut operation) = self.queue.pop_front() {
+                operation.finish();
+            }
         }
     }
 }
@@ -382,29 +482,53 @@ struct WriteStrategy {
     fallback_flags: BlockFlags,
 }
 
-fn process_undo(
+fn process_replay(
     world: &World,
     history: &mut HistoryEntry,
+    direction: ReplayDirection,
+    next_index: &mut usize,
     budget: usize,
     writer: &WriteStrategy,
+    chunk_cursor: &mut Option<ChunkCursor>,
 ) -> ProcessResult {
     let mut visited = 0;
-    let mut chunk_cursor = None;
     while visited < budget {
-        let Some(change) = history.changes.pop() else {
+        let Some(change) = next_replay_change(history, direction, next_index) else {
             return ProcessResult::Finished { scanned: visited };
         };
-        writer.set_block_state(world, &mut chunk_cursor, change.pos, change.old_state);
+        let state = match direction {
+            ReplayDirection::Undo => change.old_state,
+            ReplayDirection::Redo => change.new_state,
+        };
+        writer.set_block_state(world, chunk_cursor, change.pos, state);
         visited += 1;
     }
     ProcessResult::Pending { scanned: visited }
+}
+
+fn next_replay_change<'a>(
+    history: &'a HistoryEntry,
+    direction: ReplayDirection,
+    next_index: &mut usize,
+) -> Option<&'a BlockChange> {
+    match direction {
+        ReplayDirection::Undo => {
+            *next_index = next_index.checked_sub(1)?;
+            history.changes.get(*next_index)
+        }
+        ReplayDirection::Redo => {
+            let change = history.changes.get(*next_index)?;
+            *next_index += 1;
+            Some(change)
+        }
+    }
 }
 
 impl WriteStrategy {
     fn new(config: &Config) -> Self {
         Self {
             // Direct chunk writes avoid world-level neighbor update paths.
-            direct_chunk_writes: config.fast_mode && config.notify_clients,
+            direct_chunk_writes: config.fast_mode,
             fallback_flags: block_flags(config),
         }
     }

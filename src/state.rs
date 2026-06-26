@@ -42,36 +42,69 @@ impl PluginState {
         self.sessions.get(owner).map(|session| session.selection)
     }
 
-    pub fn push_history(&mut self, owner: String, entry: HistoryEntry) {
-        let max_entries = self.config.max_history_entries;
-        let max_blocks = self.config.max_history_blocks;
+    pub fn push_undo_history(&mut self, owner: String, entry: HistoryEntry) {
         let session = self.sessions.entry(owner).or_default();
-
-        session.history.push_front(entry);
-        while session.history.len() > max_entries {
-            session.history.pop_back();
-        }
-        while total_history_blocks(&session.history) > max_blocks {
-            session.history.pop_back();
-        }
+        session.redo_history.clear();
+        session.redo_blocks = 0;
+        push_undo_history(session, entry, &self.config);
     }
 
-    pub fn pop_history(&mut self, owner: &str) -> Option<HistoryEntry> {
+    pub fn push_replayed_undo_history(&mut self, owner: String, entry: HistoryEntry) {
+        let session = self.sessions.entry(owner).or_default();
+        push_undo_history(session, entry, &self.config);
+    }
+
+    pub fn push_redo_history(&mut self, owner: String, entry: HistoryEntry) {
+        let session = self.sessions.entry(owner).or_default();
+        push_history_entry(
+            &mut session.redo_history,
+            &mut session.redo_blocks,
+            entry,
+            self.config.max_history_entries,
+            self.config.max_history_blocks,
+        );
+    }
+
+    pub fn pop_undo_history(&mut self, owner: &str) -> Option<HistoryEntry> {
+        self.sessions.get_mut(owner).and_then(|session| {
+            pop_history_entry(&mut session.undo_history, &mut session.undo_blocks)
+        })
+    }
+
+    pub fn pop_redo_history(&mut self, owner: &str) -> Option<HistoryEntry> {
+        self.sessions.get_mut(owner).and_then(|session| {
+            pop_history_entry(&mut session.redo_history, &mut session.redo_blocks)
+        })
+    }
+
+    pub fn latest_undo_history(&self, owner: &str) -> Option<HistoryInfo> {
         self.sessions
-            .get_mut(owner)
-            .and_then(|session| session.history.pop_front())
+            .get(owner)
+            .and_then(|session| history_info(session.undo_history.front()))
+    }
+
+    pub fn latest_redo_history(&self, owner: &str) -> Option<HistoryInfo> {
+        self.sessions
+            .get(owner)
+            .and_then(|session| history_info(session.redo_history.front()))
     }
 
     fn prune_all_history(&mut self) {
         let max_entries = self.config.max_history_entries;
         let max_blocks = self.config.max_history_blocks;
         for session in self.sessions.values_mut() {
-            while session.history.len() > max_entries {
-                session.history.pop_back();
-            }
-            while total_history_blocks(&session.history) > max_blocks {
-                session.history.pop_back();
-            }
+            prune_history(
+                &mut session.undo_history,
+                &mut session.undo_blocks,
+                max_entries,
+                max_blocks,
+            );
+            prune_history(
+                &mut session.redo_history,
+                &mut session.redo_blocks,
+                max_entries,
+                max_blocks,
+            );
         }
     }
 }
@@ -82,12 +115,70 @@ pub enum SelectionSlot {
     Pos2,
 }
 
+pub struct HistoryInfo {
+    pub world_id: String,
+    pub blocks: usize,
+}
+
 #[derive(Default)]
 struct PlayerSession {
     selection: Selection,
-    history: VecDeque<HistoryEntry>,
+    undo_history: VecDeque<HistoryEntry>,
+    redo_history: VecDeque<HistoryEntry>,
+    undo_blocks: usize,
+    redo_blocks: usize,
 }
 
-fn total_history_blocks(history: &VecDeque<HistoryEntry>) -> usize {
-    history.iter().map(HistoryEntry::len).sum()
+fn push_history_entry(
+    history: &mut VecDeque<HistoryEntry>,
+    block_count: &mut usize,
+    entry: HistoryEntry,
+    max_entries: usize,
+    max_blocks: usize,
+) {
+    *block_count = block_count.saturating_add(entry.len());
+    history.push_front(entry);
+    prune_history(history, block_count, max_entries, max_blocks);
+}
+
+fn push_undo_history(session: &mut PlayerSession, entry: HistoryEntry, config: &Config) {
+    push_history_entry(
+        &mut session.undo_history,
+        &mut session.undo_blocks,
+        entry,
+        config.max_history_entries,
+        config.max_history_blocks,
+    );
+}
+
+fn history_info(entry: Option<&HistoryEntry>) -> Option<HistoryInfo> {
+    let entry = entry?;
+    Some(HistoryInfo {
+        world_id: entry.world_id().to_owned(),
+        blocks: entry.len(),
+    })
+}
+
+fn pop_history_entry(
+    history: &mut VecDeque<HistoryEntry>,
+    block_count: &mut usize,
+) -> Option<HistoryEntry> {
+    let entry = history.pop_front()?;
+    *block_count = block_count.saturating_sub(entry.len());
+    Some(entry)
+}
+
+fn prune_history(
+    history: &mut VecDeque<HistoryEntry>,
+    block_count: &mut usize,
+    max_entries: usize,
+    max_blocks: usize,
+) {
+    while history.len() > max_entries || *block_count > max_blocks {
+        let Some(entry) = history.pop_back() else {
+            *block_count = 0;
+            return;
+        };
+        *block_count = block_count.saturating_sub(entry.len());
+    }
 }

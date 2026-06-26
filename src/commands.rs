@@ -2,7 +2,10 @@
 // SPDX-License-Identifier: MIT
 
 use crate::{
-    config::{Config, PERM_LIMIT_BYPASS, PERM_POS, PERM_REPLACE, PERM_SET, PERM_STATUS, PERM_UNDO},
+    config::{
+        Config, PERM_LIMIT_BYPASS, PERM_POS, PERM_REDO, PERM_REPLACE, PERM_SET, PERM_STATUS,
+        PERM_UNDO,
+    },
     engine::{parse_block_state, BlockPos, EditOperation, EditQueue, Selection},
     messages::{self, MessageKind},
     state::{PluginState, SelectionSlot},
@@ -28,6 +31,7 @@ pub fn register(context: &Context, state: Arc<Mutex<PluginState>>, queue: Arc<Mu
     register_set(context, Arc::clone(&state), Arc::clone(&queue));
     register_replace(context, Arc::clone(&state), Arc::clone(&queue));
     register_undo(context, Arc::clone(&state), Arc::clone(&queue));
+    register_redo(context, Arc::clone(&state), Arc::clone(&queue));
     register_admin(context, state, queue);
 }
 
@@ -82,6 +86,13 @@ fn register_undo(context: &Context, state: Arc<Mutex<PluginState>>, queue: Arc<M
     context.register_command(command, PERM_UNDO);
 }
 
+fn register_redo(context: &Context, state: Arc<Mutex<PluginState>>, queue: Arc<Mutex<EditQueue>>) {
+    let names = ["/redo".to_owned()];
+    let command = Command::new(&names, "Redoes the latest WorldPumpkin edit")
+        .execute(RedoCommand { state, queue });
+    context.register_command(command, PERM_REDO);
+}
+
 fn register_admin(context: &Context, state: Arc<Mutex<PluginState>>, queue: Arc<Mutex<EditQueue>>) {
     let reload = CommandNode::literal("reload").execute(ReloadCommand {
         data_folder: context.get_data_folder(),
@@ -127,7 +138,7 @@ impl EventHandler<PlayerCommandSendEvent> for DoubleSlashCommandHandler {
 fn is_worldpumpkin_command(command: &str) -> bool {
     matches!(
         command.split_whitespace().next(),
-        Some("pos1" | "pos2" | "set" | "replace" | "undo")
+        Some("pos1" | "pos2" | "set" | "replace" | "undo" | "redo")
     )
 }
 
@@ -160,7 +171,7 @@ fn handle_double_slash_command(
                 to,
                 Arc::clone(state),
             ));
-            send_player_ok(player, "Queued //set operation.");
+            send_player_ok(player, &queued_message(cuboid.volume()));
             Ok(())
         }
         Some("replace") => {
@@ -187,28 +198,69 @@ fn handle_double_slash_command(
                 to,
                 Arc::clone(state),
             ));
-            send_player_ok(player, "Queued //replace operation.");
+            send_player_ok(player, &queued_message(cuboid.volume()));
             Ok(())
         }
         Some("undo") => {
             require_player_permission(player, PERM_UNDO)?;
             ensure_no_extra_args(parts)?;
             let owner = player.get_name();
+            let info = state
+                .lock()
+                .unwrap()
+                .latest_undo_history(&owner)
+                .ok_or_else(|| "Nothing to undo.".to_owned())?;
+            let world = player.get_world();
+            if world.get_id() != info.world_id {
+                return Err("That edit was made in another world.".to_owned());
+            }
+            let history_blocks = info.blocks as u64;
+            let config = state.lock().unwrap().config().clone();
+            queue.lock().unwrap().can_enqueue(history_blocks, &config)?;
             let history = state
                 .lock()
                 .unwrap()
-                .pop_history(&owner)
-                .ok_or_else(|| "No WorldPumpkin history entry to undo.".to_owned())?;
-            let world = player.get_world();
-            if world.get_id() != history.world_id() {
-                return Err("The latest history entry belongs to a different world.".to_owned());
-            }
-            let history_blocks = history.len() as u64;
-            let config = state.lock().unwrap().config().clone();
+                .pop_undo_history(&owner)
+                .ok_or_else(|| "Nothing to undo.".to_owned())?;
             let mut queue = queue.lock().unwrap();
-            queue.can_enqueue(history_blocks, &config)?;
-            queue.enqueue(EditOperation::undo(owner, world, history));
-            send_player_ok(player, "Queued //undo operation.");
+            queue.enqueue(EditOperation::undo(
+                owner,
+                world,
+                history,
+                Arc::clone(state),
+            ));
+            send_player_ok(player, &queued_undo_message(history_blocks));
+            Ok(())
+        }
+        Some("redo") => {
+            require_player_permission(player, PERM_REDO)?;
+            ensure_no_extra_args(parts)?;
+            let owner = player.get_name();
+            let info = state
+                .lock()
+                .unwrap()
+                .latest_redo_history(&owner)
+                .ok_or_else(|| "Nothing to redo.".to_owned())?;
+            let world = player.get_world();
+            if world.get_id() != info.world_id {
+                return Err("That edit was made in another world.".to_owned());
+            }
+            let history_blocks = info.blocks as u64;
+            let config = state.lock().unwrap().config().clone();
+            queue.lock().unwrap().can_enqueue(history_blocks, &config)?;
+            let history = state
+                .lock()
+                .unwrap()
+                .pop_redo_history(&owner)
+                .ok_or_else(|| "Nothing to redo.".to_owned())?;
+            let mut queue = queue.lock().unwrap();
+            queue.enqueue(EditOperation::redo(
+                owner,
+                world,
+                history,
+                Arc::clone(state),
+            ));
+            send_player_ok(player, &queued_redo_message(history_blocks));
             Ok(())
         }
         _ => Ok(()),
@@ -251,10 +303,10 @@ fn player_selection_context(
         .lock()
         .unwrap()
         .selection(&owner)
-        .ok_or_else(|| "Set both //pos1 and //pos2 first.".to_owned())?;
+        .ok_or_else(|| "Select two positions first.".to_owned())?;
     let cuboid = selection
         .cuboid()
-        .ok_or_else(|| "Set both //pos1 and //pos2 first.".to_owned())?;
+        .ok_or_else(|| "Select two positions first.".to_owned())?;
     Ok((owner, player.get_world(), cuboid))
 }
 
@@ -268,14 +320,16 @@ fn enforce_player_limit(
         return Ok(());
     }
 
-    Err(format!("Selection has {volume} blocks, limit is {max}."))
+    Err(format!(
+        "Selection is too large: {volume} blocks, limit is {max}."
+    ))
 }
 
 fn require_player_permission(player: &Player, permission: &str) -> Result<(), String> {
     if player.has_permission(permission) {
         Ok(())
     } else {
-        Err("I'm sorry, but you do not have permission to perform this command.".to_owned())
+        Err("You don't have permission for that.".to_owned())
     }
 }
 
@@ -349,7 +403,7 @@ impl CommandHandler for SetCommand {
             to,
             Arc::clone(&self.state),
         ));
-        send_ok(&sender, "Queued //set operation.");
+        send_ok(&sender, &queued_message(cuboid.volume()));
         Ok(1)
     }
 }
@@ -383,7 +437,7 @@ impl CommandHandler for ReplaceCommand {
             to,
             Arc::clone(&self.state),
         ));
-        send_ok(&sender, "Queued //replace operation.");
+        send_ok(&sender, &queued_message(cuboid.volume()));
         Ok(1)
     }
 }
@@ -401,29 +455,91 @@ impl CommandHandler for UndoCommand {
         _args: ConsumedArgs,
     ) -> Result<i32, CommandError> {
         let owner = owner_id(&sender);
+        let info = self
+            .state
+            .lock()
+            .unwrap()
+            .latest_undo_history(&owner)
+            .ok_or_else(|| command_failed("Nothing to undo."))?;
+        let world = sender
+            .world()
+            .ok_or_else(|| command_failed("Only players in a world can undo."))?;
+        if world.get_id() != info.world_id {
+            return Err(command_failed("That edit was made in another world."));
+        }
+
+        let history_blocks = info.blocks as u64;
+        let config = self.state.lock().unwrap().config().clone();
+        self.queue
+            .lock()
+            .unwrap()
+            .can_enqueue(history_blocks, &config)
+            .map_err(command_failed)?;
         let history = self
             .state
             .lock()
             .unwrap()
-            .pop_history(&owner)
-            .ok_or_else(|| command_failed("No WorldPumpkin history entry to undo."))?;
+            .pop_undo_history(&owner)
+            .ok_or_else(|| command_failed("Nothing to undo."))?;
+        let mut queue = self.queue.lock().unwrap();
+        queue.enqueue(EditOperation::undo(
+            owner,
+            world,
+            history,
+            Arc::clone(&self.state),
+        ));
+        send_ok(&sender, &queued_undo_message(history_blocks));
+        Ok(1)
+    }
+}
+
+struct RedoCommand {
+    state: Arc<Mutex<PluginState>>,
+    queue: Arc<Mutex<EditQueue>>,
+}
+
+impl CommandHandler for RedoCommand {
+    fn handle(
+        &self,
+        sender: CommandSender,
+        _server: Server,
+        _args: ConsumedArgs,
+    ) -> Result<i32, CommandError> {
+        let owner = owner_id(&sender);
+        let info = self
+            .state
+            .lock()
+            .unwrap()
+            .latest_redo_history(&owner)
+            .ok_or_else(|| command_failed("Nothing to redo."))?;
         let world = sender
             .world()
-            .ok_or_else(|| command_failed("Only an in-world sender can undo edits."))?;
-        if world.get_id() != history.world_id() {
-            return Err(command_failed(
-                "The latest history entry belongs to a different world.",
-            ));
+            .ok_or_else(|| command_failed("Only players in a world can redo."))?;
+        if world.get_id() != info.world_id {
+            return Err(command_failed("That edit was made in another world."));
         }
 
-        let history_blocks = history.len() as u64;
+        let history_blocks = info.blocks as u64;
         let config = self.state.lock().unwrap().config().clone();
-        let mut queue = self.queue.lock().unwrap();
-        queue
+        self.queue
+            .lock()
+            .unwrap()
             .can_enqueue(history_blocks, &config)
             .map_err(command_failed)?;
-        queue.enqueue(EditOperation::undo(owner, world, history));
-        send_ok(&sender, "Queued //undo operation.");
+        let history = self
+            .state
+            .lock()
+            .unwrap()
+            .pop_redo_history(&owner)
+            .ok_or_else(|| command_failed("Nothing to redo."))?;
+        let mut queue = self.queue.lock().unwrap();
+        queue.enqueue(EditOperation::redo(
+            owner,
+            world,
+            history,
+            Arc::clone(&self.state),
+        ));
+        send_ok(&sender, &queued_redo_message(history_blocks));
         Ok(1)
     }
 }
@@ -466,7 +582,7 @@ impl CommandHandler for StatusCommand {
         send_ok(
             &sender,
             &format!(
-                "queued={queued}, queued_blocks={queued_blocks}, blocks/tick={}, max/op={}, fast_mode={}, TPS={:.2}, MSPT={:.2}",
+                "Queue: {queued} edits, {queued_blocks} blocks. Speed: {}/tick. Limit: {}. Fast mode: {}. Server: {:.2} TPS, {:.2} MSPT.",
                 config.blocks_per_tick,
                 config.max_blocks_per_operation,
                 config.fast_mode,
@@ -494,13 +610,13 @@ fn selection_context(
         .lock()
         .unwrap()
         .selection(&owner)
-        .ok_or_else(|| command_failed("Set both //pos1 and //pos2 first."))?;
+        .ok_or_else(|| command_failed("Select two positions first."))?;
     let cuboid = selection
         .cuboid()
-        .ok_or_else(|| command_failed("Set both //pos1 and //pos2 first."))?;
+        .ok_or_else(|| command_failed("Select two positions first."))?;
     let world = sender
         .world()
-        .ok_or_else(|| command_failed("Only an in-world sender can edit blocks."))?;
+        .ok_or_else(|| command_failed("Only players in a world can edit blocks."))?;
     Ok((owner, world, cuboid))
 }
 
@@ -516,20 +632,20 @@ fn enforce_limit(
     }
 
     Err(command_failed(format!(
-        "Selection has {volume} blocks, limit is {max}."
+        "Selection is too large: {volume} blocks, limit is {max}."
     )))
 }
 
 fn selection_message(selection: Selection) -> String {
     match selection.cuboid() {
         Some(cuboid) => format!(
-            "Selection updated: pos1={}, pos2={}, blocks={}",
+            "Selection: {} -> {} ({} blocks)",
             format_selection_pos(selection.pos1),
             format_selection_pos(selection.pos2),
             cuboid.volume()
         ),
         None => format!(
-            "Selection updated: pos1={}, pos2={}, blocks=not complete",
+            "Selection: {} -> {}",
             format_selection_pos(selection.pos1),
             format_selection_pos(selection.pos2)
         ),
@@ -553,7 +669,7 @@ fn string_arg(args: &ConsumedArgs, key: &str) -> Result<String, CommandError> {
 fn sender_position(sender: &CommandSender) -> Result<BlockPos, CommandError> {
     let (x, y, z) = sender
         .position()
-        .ok_or_else(|| command_failed("Console must pass an explicit block position."))?;
+        .ok_or_else(|| command_failed("Console needs a block position."))?;
     Ok(BlockPos {
         x: x.floor() as i32,
         y: y.floor() as i32,
@@ -567,6 +683,18 @@ fn owner_id(sender: &CommandSender) -> String {
 
 fn send_ok(sender: &CommandSender, message: &str) {
     sender.send_system_message(messages::prefixed(MessageKind::Info, message));
+}
+
+fn queued_message(blocks: u64) -> String {
+    format!("Queued {blocks} blocks.")
+}
+
+fn queued_undo_message(blocks: u64) -> String {
+    format!("Undo queued ({blocks} blocks).")
+}
+
+fn queued_redo_message(blocks: u64) -> String {
+    format!("Redo queued ({blocks} blocks).")
 }
 
 fn command_failed(message: impl Into<String>) -> CommandError {
