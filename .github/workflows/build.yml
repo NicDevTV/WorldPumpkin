@@ -33,14 +33,20 @@ jobs:
 
       - name: Install Rust toolchain
         run: |
-          rustup toolchain install nightly --profile minimal --target wasm32-wasip2 --component rustfmt
+          rustup toolchain install nightly --profile minimal --target wasm32-wasip2 --component rustfmt --component clippy
           rustup default nightly
 
       - name: Cache Cargo
         uses: Swatinem/rust-cache@v2.9.1
 
+      - name: Check license headers
+        run: scripts/check-license-headers.sh
+
       - name: Check formatting
         run: cargo fmt --all --check
+
+      - name: Lint
+        run: cargo clippy --locked --target wasm32-wasip2 --all-targets -- -D warnings
 
       - name: Check Wasm build
         run: cargo check --locked --target wasm32-wasip2

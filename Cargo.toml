@@ -9,8 +9,13 @@ description = "A small world plugin for Pumpkin Minecraft servers."
 crate-type = ["cdylib"]
 
 [dependencies]
-pumpkin-plugin-api = { version = "0.1.0", git = "https://github.com/Pumpkin-MC/Pumpkin", package = "pumpkin-plugin-api" }
+pumpkin-plugin-api = { version = "0.1.0", git = "https://github.com/Pumpkin-MC/Pumpkin", rev = "39596c1b9f9aab633cfca4dec419b1f4261e8f01", package = "pumpkin-plugin-api" }
+serde = { version = "1", features = ["derive"] }
+toml = "0.9"
 tracing = "0.1"
+
+[build-dependencies]
+pumpkin-data = { git = "https://github.com/Pumpkin-MC/Pumpkin", rev = "39596c1b9f9aab633cfca4dec419b1f4261e8f01", package = "pumpkin-data", default-features = false, features = ["block", "tag"] }
 
 [profile.release]
 lto = true
