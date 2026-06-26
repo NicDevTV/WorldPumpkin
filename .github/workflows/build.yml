@@ -26,8 +26,8 @@ jobs:
 
       - name: Validate tag
         run: |
-          if ! [[ "${{ inputs.tag }}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "Tag must look like v0.0.1"
+          if ! [[ "${{ inputs.tag }}" =~ ^v.+$ ]]; then
+            echo "Tag must start with v, for example v0.0.1 or v0.1.0-alpha.1"
             exit 1
           fi
 
