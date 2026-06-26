@@ -1,0 +1,64 @@
+name: Build Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag, for example v0.0.1"
+        required: true
+        type: string
+
+env:
+  CARGO_TERM_COLOR: always
+  PLUGIN_WASM: target/wasm32-wasip2/release/world_pumpkin.wasm
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build Draft Release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout WorldPumpkin
+        uses: actions/checkout@v7
+
+      - name: Validate tag
+        run: |
+          if ! [[ "${{ inputs.tag }}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Tag must look like v0.0.1"
+            exit 1
+          fi
+
+      - name: Install Rust toolchain
+        run: |
+          rustup toolchain install nightly --profile minimal --target wasm32-wasip2 --component rustfmt
+          rustup default nightly
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2.9.1
+
+      - name: Check formatting
+        run: cargo fmt --all --check
+
+      - name: Check Wasm build
+        run: cargo check --locked --target wasm32-wasip2
+
+      - name: Build release Wasm
+        run: cargo build --locked --release --target wasm32-wasip2
+
+      - name: Create release bundle
+        run: |
+          mkdir -p dist
+          cp "$PLUGIN_WASM" "dist/world_pumpkin-${{ inputs.tag }}.wasm"
+
+      - name: Create draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ inputs.tag }}" \
+            --draft \
+            --title "WorldPumpkin ${{ inputs.tag }}" \
+            --notes "Draft release for WorldPumpkin ${{ inputs.tag }}." \
+            "dist/world_pumpkin-${{ inputs.tag }}.wasm"
