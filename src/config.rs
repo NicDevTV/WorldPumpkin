@@ -272,7 +272,10 @@ notify_clients = false
         )
         .unwrap();
 
-        assert_eq!(config.max_blocks_per_operation, Config::default().max_blocks_per_operation);
+        assert_eq!(
+            config.max_blocks_per_operation,
+            Config::default().max_blocks_per_operation
+        );
         assert_eq!(config.blocks_per_tick, 4096);
         assert!(!config.notify_clients);
     }

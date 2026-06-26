@@ -510,10 +510,9 @@ fn block_state_key(input: &str) -> u64 {
     const OFFSET: u64 = 0xcbf29ce484222325;
     const PRIME: u64 = 0x100000001b3;
 
-    input
-        .as_bytes()
-        .iter()
-        .fold(OFFSET, |hash, byte| (hash ^ u64::from(*byte)).wrapping_mul(PRIME))
+    input.as_bytes().iter().fold(OFFSET, |hash, byte| {
+        (hash ^ u64::from(*byte)).wrapping_mul(PRIME)
+    })
 }
 
 #[cfg(test)]
