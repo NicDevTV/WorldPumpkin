@@ -1,0 +1,105 @@
+name: Nightly Build
+
+on:
+  schedule:
+    # 00:00 CET = 23:00 UTC
+    - cron: "0 23 * * *"
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  PLUGIN_WASM: target/wasm32-wasip2/release/world_pumpkin.wasm
+  NIGHTLY_TAG: nightly
+  ASSET_NAME: world_pumpkin-nightly.wasm
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build Nightly Prerelease
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout WorldPumpkin
+        uses: actions/checkout@v7
+
+      - name: Install Rust toolchain
+        run: |
+          rustup toolchain install nightly --profile minimal --target wasm32-wasip2 --component rustfmt --component clippy
+          rustup default nightly
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2.9.1
+
+      - name: Check license headers
+        run: scripts/check-license-headers.sh
+
+      - name: Check formatting
+        run: cargo fmt --all --check
+
+      - name: Lint
+        run: cargo clippy --locked --target wasm32-wasip2 --all-targets -- -D warnings
+
+      - name: Check Wasm build
+        run: cargo check --locked --target wasm32-wasip2
+
+      - name: Build release Wasm
+        run: cargo build --locked --release --target wasm32-wasip2
+
+      - name: Create release bundle
+        run: |
+          mkdir -p dist
+          cp "$PLUGIN_WASM" "dist/$ASSET_NAME"
+
+      - name: Check if nightly asset changed
+        id: wasm
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          NEW_SHA="$(sha256sum "dist/$ASSET_NAME" | cut -d ' ' -f 1)"
+          echo "new_sha=$NEW_SHA" >> "$GITHUB_OUTPUT"
+
+          if gh release view "$NIGHTLY_TAG" >/dev/null 2>&1; then
+            mkdir -p old
+            if gh release download "$NIGHTLY_TAG" --pattern "$ASSET_NAME" --dir old >/dev/null 2>&1; then
+              OLD_SHA="$(sha256sum "old/$ASSET_NAME" | cut -d ' ' -f 1)"
+              echo "old_sha=$OLD_SHA" >> "$GITHUB_OUTPUT"
+
+              if [ "$NEW_SHA" = "$OLD_SHA" ]; then
+                echo "changed=false" >> "$GITHUB_OUTPUT"
+                exit 0
+              fi
+            fi
+          fi
+
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Publish or update nightly prerelease
+        if: steps.wasm.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          GENERATED_ON="$(date -u '+%Y-%m-%d %H:%M UTC')"
+          NOTES="Generated on: $GENERATED_ON"
+
+          if gh release view "$NIGHTLY_TAG" >/dev/null 2>&1; then
+            gh release edit "$NIGHTLY_TAG" \
+              --title "Nightly Build" \
+              --notes "$NOTES" \
+              --prerelease \
+              --latest=false
+
+            gh release delete-asset "$NIGHTLY_TAG" "$ASSET_NAME" -y || true
+
+            gh release upload "$NIGHTLY_TAG" \
+              "dist/$ASSET_NAME" \
+              --clobber
+          else
+            gh release create "$NIGHTLY_TAG" \
+              --title "Nightly Build" \
+              --notes "$NOTES" \
+              --prerelease \
+              --latest=false \
+              "dist/$ASSET_NAME"
+          fi
