@@ -6,13 +6,17 @@ use crate::{
         Config, PERM_LIMIT_BYPASS, PERM_POS, PERM_REDO, PERM_REPLACE, PERM_SET, PERM_STATUS,
         PERM_UNDO,
     },
-    engine::{parse_block_state, BlockPos, EditOperation, EditQueue, Selection},
+    engine::{
+        parse_block_pattern, parse_block_state, BlockPattern, BlockPos, EditOperation, EditQueue,
+        Selection,
+    },
     messages::{self, MessageKind},
     state::{PluginState, SelectionSlot},
+    PLUGIN_VERSION, PUMPKIN_API_GIT, PUMPKIN_API_REV, PUMPKIN_API_VERSION,
 };
 use pumpkin_plugin_api::{
     command::{Command, CommandError, CommandNode, CommandSender, ConsumedArgs},
-    command_wit::{Arg, ArgumentType},
+    command_wit::{Arg, ArgumentType, StringType},
     commands::CommandHandler,
     events::{EventData, EventHandler, PlayerCommandSendEvent},
     player::Player,
@@ -22,6 +26,7 @@ use std::sync::{Arc, Mutex};
 
 const ARG_POS: &str = "pos";
 const ARG_BLOCK: &str = "block";
+const ARG_PATTERN: &str = "pattern";
 const ARG_FROM: &str = "from";
 const ARG_TO: &str = "to";
 
@@ -54,11 +59,22 @@ fn register_pos(context: &Context, state: Arc<Mutex<PluginState>>, slot: Selecti
 }
 
 fn register_set(context: &Context, state: Arc<Mutex<PluginState>>, queue: Arc<Mutex<EditQueue>>) {
-    let block_arg = CommandNode::argument(ARG_BLOCK, &ArgumentType::BlockState)
-        .execute(SetCommand { state, queue });
+    let block_arg =
+        CommandNode::argument(ARG_BLOCK, &ArgumentType::BlockState).execute(SetCommand {
+            state: Arc::clone(&state),
+            queue: Arc::clone(&queue),
+        });
+    let pattern_arg = CommandNode::argument(ARG_PATTERN, &ArgumentType::String(StringType::Greedy))
+        .execute(SetCommand {
+            state: Arc::clone(&state),
+            queue: Arc::clone(&queue),
+        });
+    let pattern = CommandNode::literal("pattern");
+    pattern.then(pattern_arg);
     let names = ["/set".to_owned()];
     let command = Command::new(&names, "Fills a WorldPumpkin selection");
     command.then(block_arg);
+    command.then(pattern);
     context.register_command(command, PERM_SET);
 }
 
@@ -71,8 +87,16 @@ fn register_replace(
         state: Arc::clone(&state),
         queue: Arc::clone(&queue),
     });
+    let pattern_arg = CommandNode::argument(ARG_PATTERN, &ArgumentType::String(StringType::Greedy))
+        .execute(ReplaceCommand {
+            state: Arc::clone(&state),
+            queue: Arc::clone(&queue),
+        });
+    let pattern = CommandNode::literal("pattern");
+    pattern.then(pattern_arg);
     let from_arg = CommandNode::argument(ARG_FROM, &ArgumentType::BlockState);
     from_arg.then(to_arg);
+    from_arg.then(pattern);
     let names = ["/replace".to_owned()];
     let command = Command::new(&names, "Replaces blocks in a selection");
     command.then(from_arg);
@@ -99,10 +123,12 @@ fn register_admin(context: &Context, state: Arc<Mutex<PluginState>>, queue: Arc<
         state: Arc::clone(&state),
     });
     let status = CommandNode::literal("status").execute(StatusCommand { state, queue });
+    let info = CommandNode::literal("info").execute(InfoCommand);
     let names = ["worldpumpkin".to_owned(), "wp".to_owned()];
     let command = Command::new(&names, "WorldPumpkin administration");
     command.then(reload);
     command.then(status);
+    command.then(info);
     context.register_command(command, PERM_STATUS);
 }
 
@@ -158,7 +184,7 @@ fn handle_double_slash_command(
                 .next()
                 .ok_or_else(|| "Usage: //set <block>".to_owned())?;
             ensure_no_extra_args(parts)?;
-            let to = parse_block_state(block)?;
+            let to = parse_block_pattern(block)?;
             let (owner, world, cuboid) = player_selection_context(player, state)?;
             enforce_player_limit(player, cuboid.volume(), state)?;
             let config = state.lock().unwrap().config().clone();
@@ -183,7 +209,7 @@ fn handle_double_slash_command(
             let to = parts
                 .next()
                 .ok_or_else(|| "Usage: //replace <from> <to>".to_owned())
-                .and_then(parse_block_state)?;
+                .and_then(parse_block_pattern)?;
             ensure_no_extra_args(parts)?;
             let (owner, world, cuboid) = player_selection_context(player, state)?;
             enforce_player_limit(player, cuboid.volume(), state)?;
@@ -388,7 +414,7 @@ impl CommandHandler for SetCommand {
         server: Server,
         args: ConsumedArgs,
     ) -> Result<i32, CommandError> {
-        let to = parse_block_state(&string_arg(&args, ARG_BLOCK)?).map_err(command_failed)?;
+        let to = block_pattern_arg(&args, ARG_BLOCK)?;
         let (owner, world, cuboid) = selection_context(&sender, &self.state)?;
         enforce_limit(&sender, &server, cuboid.volume(), &self.state)?;
         let config = self.state.lock().unwrap().config().clone();
@@ -421,7 +447,7 @@ impl CommandHandler for ReplaceCommand {
         args: ConsumedArgs,
     ) -> Result<i32, CommandError> {
         let from = parse_block_state(&string_arg(&args, ARG_FROM)?).map_err(command_failed)?;
-        let to = parse_block_state(&string_arg(&args, ARG_TO)?).map_err(command_failed)?;
+        let to = block_pattern_arg(&args, ARG_TO)?;
         let (owner, world, cuboid) = selection_context(&sender, &self.state)?;
         enforce_limit(&sender, &server, cuboid.volume(), &self.state)?;
         let config = self.state.lock().unwrap().config().clone();
@@ -568,6 +594,26 @@ struct StatusCommand {
     queue: Arc<Mutex<EditQueue>>,
 }
 
+struct InfoCommand;
+
+impl CommandHandler for InfoCommand {
+    fn handle(
+        &self,
+        sender: CommandSender,
+        _server: Server,
+        _args: ConsumedArgs,
+    ) -> Result<i32, CommandError> {
+        send_ok(
+            &sender,
+            &format!(
+                "WorldPumpkin {PLUGIN_VERSION}. Pumpkin API {PUMPKIN_API_VERSION} ({short_rev}). Source: {PUMPKIN_API_GIT}.",
+                short_rev = short_rev(PUMPKIN_API_REV)
+            ),
+        );
+        Ok(1)
+    }
+}
+
 impl CommandHandler for StatusCommand {
     fn handle(
         &self,
@@ -579,15 +625,19 @@ impl CommandHandler for StatusCommand {
         let queue = self.queue.lock().unwrap();
         let queued = queue.len();
         let queued_blocks = queue.queued_blocks();
+        let work = if queued == 0 {
+            "Idle".to_owned()
+        } else {
+            format!("{queued} edits waiting ({queued_blocks} blocks)")
+        };
         send_ok(
             &sender,
             &format!(
-                "Queue: {queued} edits, {queued_blocks} blocks. Speed: {}/tick. Limit: {}. Fast mode: {}. Server: {:.2} TPS, {:.2} MSPT.",
-                config.blocks_per_tick,
+                "Status: {work}. Limit: {} blocks. Speed: {} blocks/tick. Fast edits: {}. Server: {:.1} TPS.",
                 config.max_blocks_per_operation,
-                config.fast_mode,
-                server.get_tps(),
-                server.get_mspt()
+                config.blocks_per_tick,
+                enabled_text(config.fast_mode),
+                server.get_tps()
             ),
         );
         Ok(1)
@@ -666,6 +716,18 @@ fn string_arg(args: &ConsumedArgs, key: &str) -> Result<String, CommandError> {
     }
 }
 
+fn block_pattern_arg(args: &ConsumedArgs, block_key: &str) -> Result<BlockPattern, CommandError> {
+    match args.get_value(ARG_PATTERN) {
+        Arg::Simple(value) | Arg::Block(value) | Arg::ResourceLocation(value) => {
+            parse_block_pattern(&value).map_err(command_failed)
+        }
+        _ => {
+            let state = parse_block_state(&string_arg(args, block_key)?).map_err(command_failed)?;
+            Ok(BlockPattern::single(state))
+        }
+    }
+}
+
 fn sender_position(sender: &CommandSender) -> Result<BlockPos, CommandError> {
     let (x, y, z) = sender
         .position()
@@ -695,6 +757,18 @@ fn queued_undo_message(blocks: u64) -> String {
 
 fn queued_redo_message(blocks: u64) -> String {
     format!("Redo queued ({blocks} blocks).")
+}
+
+fn enabled_text(enabled: bool) -> &'static str {
+    if enabled {
+        "on"
+    } else {
+        "off"
+    }
+}
+
+fn short_rev(rev: &str) -> &str {
+    rev.get(..8).unwrap_or(rev)
 }
 
 fn command_failed(message: impl Into<String>) -> CommandError {

@@ -10,6 +10,8 @@ use std::{
 
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
+    println!("cargo:rerun-if-changed=Cargo.toml");
+    export_pumpkin_dependency_info();
 
     let mut blocks = BTreeSet::new();
     for raw_id in 0..=4096 {
@@ -51,6 +53,36 @@ fn main() {
 
     let out_dir = PathBuf::from(env::var_os("OUT_DIR").expect("OUT_DIR is set by Cargo"));
     fs::write(out_dir.join("block_states.rs"), generated).expect("write generated block states");
+}
+
+fn export_pumpkin_dependency_info() {
+    let manifest_dir = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").expect("manifest dir"));
+    let manifest =
+        fs::read_to_string(manifest_dir.join("Cargo.toml")).expect("read Cargo.toml manifest");
+    let Some(line) = manifest
+        .lines()
+        .find(|line| line.trim_start().starts_with("pumpkin-plugin-api ="))
+    else {
+        return;
+    };
+
+    if let Some(version) = extract_manifest_value(line, "version") {
+        println!("cargo:rustc-env=WORLDPUMPKIN_PUMPKIN_API_VERSION={version}");
+    }
+    if let Some(rev) = extract_manifest_value(line, "rev") {
+        println!("cargo:rustc-env=WORLDPUMPKIN_PUMPKIN_API_REV={rev}");
+    }
+    if let Some(git) = extract_manifest_value(line, "git") {
+        println!("cargo:rustc-env=WORLDPUMPKIN_PUMPKIN_API_GIT={git}");
+    }
+}
+
+fn extract_manifest_value(line: &str, key: &str) -> Option<String> {
+    let key = format!("{key} = \"");
+    let start = line.find(&key)? + key.len();
+    let rest = &line[start..];
+    let end = rest.find('"')?;
+    Some(rest[..end].to_owned())
 }
 
 fn insert_state(states: &mut BTreeMap<u64, (String, u16)>, name: &str, state_id: u16) {

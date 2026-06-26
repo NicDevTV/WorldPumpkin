@@ -1669,11 +1669,10 @@ dependencies = [
 
 [[package]]
 name = "world-pumpkin"
-version = "0.1.0"
+version = "0.0.2"
 dependencies = [
  "pumpkin-data",
  "pumpkin-plugin-api",
- "tracing",
 ]
 
 [[package]]

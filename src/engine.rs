@@ -9,12 +9,18 @@ use pumpkin_plugin_api::{
 };
 use std::{
     collections::VecDeque,
-    sync::{Arc, Mutex},
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc, Mutex,
+    },
 };
 
 mod generated_blocks {
     include!(concat!(env!("OUT_DIR"), "/block_states.rs"));
 }
+
+// Patterns are deterministic inside one edit, but each queued edit gets a fresh distribution.
+static PATTERN_SEED: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct BlockPos {
@@ -158,13 +164,49 @@ pub struct BlockChange {
     new_state: u16,
 }
 
+#[derive(Clone, Debug)]
+pub struct BlockPattern {
+    choices: Vec<WeightedBlock>,
+    total_weight: u32,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct WeightedBlock {
+    state: u16,
+    weight: u32,
+}
+
+impl BlockPattern {
+    pub fn single(state: u16) -> Self {
+        Self {
+            choices: vec![WeightedBlock { state, weight: 1 }],
+            total_weight: 1,
+        }
+    }
+
+    fn choose(&self, pos: BlockPos, seed: u64) -> u16 {
+        let mut cursor = position_hash(pos, seed) % u64::from(self.total_weight);
+        for choice in &self.choices {
+            let weight = u64::from(choice.weight);
+            if cursor < weight {
+                return choice.state;
+            }
+            cursor -= weight;
+        }
+        self.choices
+            .last()
+            .map(|choice| choice.state)
+            .unwrap_or_default()
+    }
+}
+
 pub enum EditKind {
     Set {
-        to: u16,
+        to: BlockPattern,
     },
     Replace {
         from: u16,
-        to: u16,
+        to: BlockPattern,
     },
     Replay {
         history: HistoryEntry,
@@ -189,6 +231,7 @@ pub struct EditOperation {
     state: Arc<Mutex<PluginState>>,
     remaining: u64,
     chunk_cursor: Option<ChunkCursor>,
+    pattern_seed: u64,
 }
 
 impl EditOperation {
@@ -196,7 +239,7 @@ impl EditOperation {
         owner: String,
         world: World,
         cuboid: Cuboid,
-        to: u16,
+        to: BlockPattern,
         state: Arc<Mutex<PluginState>>,
     ) -> Self {
         let world_id = world.get_id();
@@ -210,6 +253,7 @@ impl EditOperation {
             state,
             remaining: cuboid.volume(),
             chunk_cursor: None,
+            pattern_seed: next_pattern_seed(),
         }
     }
 
@@ -218,7 +262,7 @@ impl EditOperation {
         world: World,
         cuboid: Cuboid,
         from: u16,
-        to: u16,
+        to: BlockPattern,
         state: Arc<Mutex<PluginState>>,
     ) -> Self {
         let world_id = world.get_id();
@@ -232,6 +276,7 @@ impl EditOperation {
             state,
             remaining: cuboid.volume(),
             chunk_cursor: None,
+            pattern_seed: next_pattern_seed(),
         }
     }
 
@@ -258,6 +303,7 @@ impl EditOperation {
             state,
             remaining,
             chunk_cursor: None,
+            pattern_seed: 0,
         }
     }
 
@@ -284,6 +330,7 @@ impl EditOperation {
             state,
             remaining,
             chunk_cursor: None,
+            pattern_seed: 0,
         }
     }
 
@@ -321,9 +368,11 @@ impl EditOperation {
         }
 
         match self.kind {
-            EditKind::Set { to } => self.process_forward(budget, config, &writer, None, to),
-            EditKind::Replace { from, to } => {
-                self.process_forward(budget, config, &writer, Some(from), to)
+            EditKind::Set { ref to } => {
+                self.process_forward(budget, config, &writer, None, to.clone())
+            }
+            EditKind::Replace { from, ref to } => {
+                self.process_forward(budget, config, &writer, Some(from), to.clone())
             }
             EditKind::Replay { .. } => unreachable!("history replay handled above"),
         }
@@ -362,7 +411,7 @@ impl EditOperation {
         config: &Config,
         writer: &WriteStrategy,
         replace_from: Option<u16>,
-        to: u16,
+        pattern: BlockPattern,
     ) -> ProcessResult {
         let mut visited = 0;
 
@@ -372,6 +421,7 @@ impl EditOperation {
             };
 
             visited += 1;
+            let to = pattern.choose(pos, self.pattern_seed);
             let old_state = writer.get_block_state_id(&self.world, &mut self.chunk_cursor, pos);
             if replace_from.is_none_or(|from| from == old_state) && old_state != to {
                 writer.set_block_state(&self.world, &mut self.chunk_cursor, pos, to);
@@ -630,6 +680,65 @@ pub fn parse_block_state(input: &str) -> Result<u16, String> {
         .map_err(|_| format!("unknown block state `{input}`"))
 }
 
+pub fn parse_block_pattern(input: &str) -> Result<BlockPattern, String> {
+    let mut choices = Vec::new();
+    let mut total_weight = 0_u32;
+
+    for part in input.split(',') {
+        let part = part.trim();
+        if part.is_empty() {
+            return Err("empty block in pattern".to_owned());
+        }
+        let (weight, block) = parse_weighted_block(part)?;
+        let state = parse_block_state(block)?;
+        total_weight = total_weight
+            .checked_add(weight)
+            .ok_or_else(|| "pattern weights are too large".to_owned())?;
+        choices.push(WeightedBlock { state, weight });
+    }
+
+    if choices.is_empty() {
+        return Err("empty block pattern".to_owned());
+    }
+
+    Ok(BlockPattern {
+        choices,
+        total_weight,
+    })
+}
+
+fn parse_weighted_block(input: &str) -> Result<(u32, &str), String> {
+    let Some((weight, block)) = input.split_once('%') else {
+        return Ok((1, input));
+    };
+    let weight = weight
+        .trim()
+        .parse::<u32>()
+        .map_err(|err| format!("invalid pattern weight `{}`: {err}", weight.trim()))?;
+    if weight == 0 {
+        return Err("pattern weights must be greater than 0".to_owned());
+    }
+    let block = block.trim();
+    if block.is_empty() {
+        return Err("missing block after pattern weight".to_owned());
+    }
+    Ok((weight, block))
+}
+
+fn next_pattern_seed() -> u64 {
+    PATTERN_SEED.fetch_add(1, Ordering::Relaxed)
+}
+
+fn position_hash(pos: BlockPos, seed: u64) -> u64 {
+    let mut hash = 0xcbf29ce484222325_u64 ^ seed;
+    for value in [pos.x, pos.y, pos.z] {
+        for byte in value.to_le_bytes() {
+            hash = (hash ^ u64::from(byte)).wrapping_mul(0x100000001b3);
+        }
+    }
+    hash
+}
+
 fn block_state_key(input: &str) -> u64 {
     const OFFSET: u64 = 0xcbf29ce484222325;
     const PRIME: u64 = 0x100000001b3;
@@ -641,7 +750,7 @@ fn block_state_key(input: &str) -> u64 {
 
 #[cfg(test)]
 mod tests {
-    use super::{local_chunk_pos, parse_block_state, BlockPos, Cuboid};
+    use super::{local_chunk_pos, parse_block_pattern, parse_block_state, BlockPos, Cuboid};
 
     #[test]
     fn cuboid_normalizes_and_counts_volume() {
@@ -687,6 +796,27 @@ mod tests {
     #[test]
     fn block_parser_keeps_numeric_state_ids_available() {
         assert_eq!(parse_block_state("42").unwrap(), 42);
+    }
+
+    #[test]
+    fn block_pattern_accepts_weighted_entries() {
+        let pattern = parse_block_pattern("50%dirt,50%grass_block").unwrap();
+
+        assert_eq!(pattern.total_weight, 100);
+        assert_eq!(pattern.choices.len(), 2);
+    }
+
+    #[test]
+    fn block_pattern_keeps_single_blocks_available() {
+        let pattern = parse_block_pattern("stone").unwrap();
+
+        assert_eq!(pattern.total_weight, 1);
+        assert_eq!(pattern.choose(BlockPos { x: 0, y: 0, z: 0 }, 0), 1);
+    }
+
+    #[test]
+    fn block_pattern_rejects_zero_weight() {
+        assert!(parse_block_pattern("0%dirt,100%grass_block").is_err());
     }
 
     #[test]

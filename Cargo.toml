@@ -1,6 +1,6 @@
 [package]
 name = "world-pumpkin"
-version = "0.1.0"
+version = "0.0.2"
 edition = "2021"
 license = "MIT"
 description = "A small world plugin for Pumpkin Minecraft servers."
@@ -10,7 +10,6 @@ crate-type = ["cdylib"]
 
 [dependencies]
 pumpkin-plugin-api = { version = "0.1.0", git = "https://github.com/Pumpkin-MC/Pumpkin", rev = "39596c1b9f9aab633cfca4dec419b1f4261e8f01", package = "pumpkin-plugin-api" }
-tracing = "0.1"
 
 [build-dependencies]
 pumpkin-data = { git = "https://github.com/Pumpkin-MC/Pumpkin", rev = "39596c1b9f9aab633cfca4dec419b1f4261e8f01", package = "pumpkin-data", default-features = false, features = ["block", "tag"] }

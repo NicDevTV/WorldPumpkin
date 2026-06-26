@@ -19,10 +19,32 @@ use pumpkin_plugin_api::{
 use state::PluginState;
 use std::sync::{Arc, Mutex, OnceLock};
 
-const PLUGIN_NAME: &str = "WorldPumpkin";
-const PLUGIN_VERSION: &str = env!("CARGO_PKG_VERSION");
-const PLUGIN_AUTHOR: &str = "NicDevTV";
-const PLUGIN_DESCRIPTION: &str = "Fast world editing tools for Pumpkin servers.";
+pub(crate) const PLUGIN_NAME: &str = "WorldPumpkin";
+pub(crate) const PLUGIN_VERSION: &str = env!("CARGO_PKG_VERSION");
+pub(crate) const PLUGIN_AUTHOR: &str = "NicDevTV";
+pub(crate) const PLUGIN_DESCRIPTION: &str = "Fast world editing tools for Pumpkin servers.";
+pub(crate) const PUMPKIN_API_VERSION: &str = env!("WORLDPUMPKIN_PUMPKIN_API_VERSION");
+pub(crate) const PUMPKIN_API_REV: &str = env!("WORLDPUMPKIN_PUMPKIN_API_REV");
+pub(crate) const PUMPKIN_API_GIT: &str = env!("WORLDPUMPKIN_PUMPKIN_API_GIT");
+const ANSI_RESET: &str = "\x1b[0m";
+const ANSI_ORANGE: &str = "\x1b[38;2;255;128;32m";
+const ANSI_GOLD: &str = "\x1b[38;2;255;196;64m";
+
+const WORLD_BANNER: &[&str] = &[
+    r"__        _____  ____  _     ____  ",
+    r"\ \      / / _ \|  _ \| |   |  _ \ ",
+    r" \ \ /\ / / | | | |_) | |   | | | |",
+    r"  \ V  V /| |_| |  _ <| |___| |_| |",
+    r"   \_/\_/  \___/|_| \_\_____|____/ ",
+];
+
+const PUMPKIN_BANNER: &[&str] = &[
+    r" ____  _   _ __  __ ____  _  _____ _   _ ",
+    r"|  _ \| | | |  \/  |  _ \| |/ /_ _| \ | |",
+    r"| |_) | | | | |\/| | |_) | ' / | ||  \| |",
+    r"|  __/| |_| | |  | |  __/| . \ | || |\  |",
+    r"|_|    \___/|_|  |_|_|   |_|\_\___|_| \_|",
+];
 
 static STATE: OnceLock<Arc<Mutex<PluginState>>> = OnceLock::new();
 static QUEUE: OnceLock<Arc<Mutex<EditQueue>>> = OnceLock::new();
@@ -79,9 +101,19 @@ impl Plugin for WorldPumpkin {
             queue.lock().unwrap().process_tick(&server, &config);
         });
 
-        tracing::info!("WorldPumpkin loaded");
+        print_startup_banner();
         Ok(())
     }
+}
+
+fn print_startup_banner() {
+    for line in WORLD_BANNER {
+        println!("{ANSI_ORANGE}{line}{ANSI_RESET}");
+    }
+    for line in PUMPKIN_BANNER {
+        println!("{ANSI_GOLD}{line}{ANSI_RESET}");
+    }
+    println!("{ANSI_GOLD}WorldPumpkin {PLUGIN_VERSION} loaded{ANSI_RESET}");
 }
 
 fn register_permissions(context: &Context) -> pumpkin_plugin_api::Result<()> {
