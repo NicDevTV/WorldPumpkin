@@ -16,10 +16,14 @@ pub enum MessageKind {
 pub fn prefixed(kind: MessageKind, message: &str) -> TextComponent {
     let root = TextComponent::text("");
     // Pumpkin's Wasm API has RGB components, but no MiniMessage parser.
-    append_gradient(&root, BRAND);
+    append_brand_gradient(&root);
     append_colored(&root, " › ", rgb(255, 156, 42), true);
     append_colored(&root, message, body_color(kind), false);
     root
+}
+
+pub fn append_brand_gradient(root: &TextComponent) {
+    append_gradient(root, BRAND);
 }
 
 fn append_gradient(root: &TextComponent, text: &str) {
@@ -34,6 +38,7 @@ fn append_colored(root: &TextComponent, text: &str, color: RgbColor, bold: bool)
     let child = TextComponent::text(text);
     child.color_rgb(color);
     child.bold(bold);
+    child.italic(false);
     root.add_child(child);
 }
 

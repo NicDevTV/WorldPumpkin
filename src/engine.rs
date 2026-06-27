@@ -22,7 +22,7 @@ mod generated_blocks {
 // Patterns are deterministic inside one edit, but each queued edit gets a fresh distribution.
 static PATTERN_SEED: AtomicU64 = AtomicU64::new(1);
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct BlockPos {
     pub x: i32,
     pub y: i32,
@@ -90,11 +90,26 @@ impl Cuboid {
         x * y * z
     }
 
+    pub fn wall_volume(self) -> u64 {
+        self.wall_positions().len() as u64
+    }
+
     pub fn iter(self) -> CuboidIter {
         CuboidIter {
             cuboid: self,
             next: Some(self.min),
         }
+    }
+
+    pub fn wall_positions(self) -> Vec<BlockPos> {
+        self.iter()
+            .filter(|pos| {
+                pos.x == self.min.x
+                    || pos.x == self.max.x
+                    || pos.z == self.min.z
+                    || pos.z == self.max.z
+            })
+            .collect()
     }
 }
 
@@ -177,13 +192,6 @@ struct WeightedBlock {
 }
 
 impl BlockPattern {
-    pub fn single(state: u16) -> Self {
-        Self {
-            choices: vec![WeightedBlock { state, weight: 1 }],
-            total_weight: 1,
-        }
-    }
-
     fn choose(&self, pos: BlockPos, seed: u64) -> u16 {
         let mut cursor = position_hash(pos, seed) % u64::from(self.total_weight);
         for choice in &self.choices {
@@ -226,7 +234,7 @@ pub struct EditOperation {
     world: World,
     world_id: String,
     kind: EditKind,
-    positions: CuboidIter,
+    positions: EditPositions,
     history: Vec<BlockChange>,
     state: Arc<Mutex<PluginState>>,
     remaining: u64,
@@ -248,7 +256,7 @@ impl EditOperation {
             world,
             world_id,
             kind: EditKind::Set { to },
-            positions: cuboid.iter(),
+            positions: EditPositions::cuboid(cuboid),
             history: Vec::new(),
             state,
             remaining: cuboid.volume(),
@@ -271,10 +279,34 @@ impl EditOperation {
             world,
             world_id,
             kind: EditKind::Replace { from, to },
-            positions: cuboid.iter(),
+            positions: EditPositions::cuboid(cuboid),
             history: Vec::new(),
             state,
             remaining: cuboid.volume(),
+            chunk_cursor: None,
+            pattern_seed: next_pattern_seed(),
+        }
+    }
+
+    pub fn walls(
+        owner: String,
+        world: World,
+        cuboid: Cuboid,
+        to: BlockPattern,
+        state: Arc<Mutex<PluginState>>,
+    ) -> Self {
+        let world_id = world.get_id();
+        let positions = cuboid.wall_positions();
+        let remaining = positions.len() as u64;
+        Self {
+            owner,
+            world,
+            world_id,
+            kind: EditKind::Set { to },
+            positions: EditPositions::vec(positions),
+            history: Vec::new(),
+            state,
+            remaining,
             chunk_cursor: None,
             pattern_seed: next_pattern_seed(),
         }
@@ -288,7 +320,6 @@ impl EditOperation {
     ) -> Self {
         let world_id = world.get_id();
         let remaining = history.len() as u64;
-        let cuboid = Cuboid::new(BlockPos { x: 0, y: 0, z: 0 }, BlockPos { x: 0, y: 0, z: 0 });
         Self {
             owner,
             world,
@@ -298,7 +329,7 @@ impl EditOperation {
                 history,
                 direction: ReplayDirection::Undo,
             },
-            positions: cuboid.iter(),
+            positions: EditPositions::empty(),
             history: Vec::new(),
             state,
             remaining,
@@ -315,7 +346,6 @@ impl EditOperation {
     ) -> Self {
         let world_id = world.get_id();
         let remaining = history.len() as u64;
-        let cuboid = Cuboid::new(BlockPos { x: 0, y: 0, z: 0 }, BlockPos { x: 0, y: 0, z: 0 });
         Self {
             owner,
             world,
@@ -325,7 +355,7 @@ impl EditOperation {
                 direction: ReplayDirection::Redo,
                 next_index: 0,
             },
-            positions: cuboid.iter(),
+            positions: EditPositions::empty(),
             history: Vec::new(),
             state,
             remaining,
@@ -437,6 +467,36 @@ impl EditOperation {
         }
 
         ProcessResult::Pending { scanned: visited }
+    }
+}
+
+enum EditPositions {
+    Cuboid(CuboidIter),
+    Vec(std::vec::IntoIter<BlockPos>),
+}
+
+impl EditPositions {
+    fn cuboid(cuboid: Cuboid) -> Self {
+        Self::Cuboid(cuboid.iter())
+    }
+
+    fn vec(positions: Vec<BlockPos>) -> Self {
+        Self::Vec(positions.into_iter())
+    }
+
+    fn empty() -> Self {
+        Self::Vec(Vec::new().into_iter())
+    }
+}
+
+impl Iterator for EditPositions {
+    type Item = BlockPos;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            Self::Cuboid(iter) => iter.next(),
+            Self::Vec(iter) => iter.next(),
+        }
     }
 }
 
@@ -751,6 +811,7 @@ fn block_state_key(input: &str) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::{local_chunk_pos, parse_block_pattern, parse_block_state, BlockPos, Cuboid};
+    use std::collections::HashSet;
 
     #[test]
     fn cuboid_normalizes_and_counts_volume() {
@@ -773,6 +834,43 @@ mod tests {
                 BlockPos { x: 1, y: 0, z: 1 },
             ]
         );
+    }
+
+    #[test]
+    fn wall_positions_only_include_vertical_faces() {
+        let cuboid = Cuboid::new(pos(0, 0, 0), pos(2, 2, 2));
+        let positions = cuboid.wall_positions();
+
+        assert_eq!(positions.len(), 24);
+        assert!(positions.contains(&pos(0, 1, 1)));
+        assert!(positions.contains(&pos(2, 1, 1)));
+        assert!(positions.contains(&pos(1, 1, 0)));
+        assert!(positions.contains(&pos(1, 1, 2)));
+        assert!(!positions.contains(&pos(1, 0, 1)));
+        assert!(!positions.contains(&pos(1, 2, 1)));
+        assert_unique(&positions);
+    }
+
+    #[test]
+    fn wall_positions_do_not_duplicate_thin_selections() {
+        let cuboid = Cuboid::new(pos(0, 0, 0), pos(0, 2, 2));
+        let positions = cuboid.wall_positions();
+
+        assert_eq!(positions.len(), 9);
+        assert_unique(&positions);
+    }
+
+    #[test]
+    fn wall_positions_include_one_block_tall_perimeter() {
+        let cuboid = Cuboid::new(pos(0, 5, 0), pos(2, 5, 2));
+        let positions = cuboid.wall_positions();
+
+        assert_eq!(positions.len(), 8);
+        assert!(positions.contains(&pos(0, 5, 0)));
+        assert!(positions.contains(&pos(1, 5, 0)));
+        assert!(positions.contains(&pos(2, 5, 2)));
+        assert!(!positions.contains(&pos(1, 5, 1)));
+        assert_unique(&positions);
     }
 
     #[test]
@@ -830,5 +928,14 @@ mod tests {
         assert_eq!(pos.x, 15);
         assert_eq!(pos.y, 64);
         assert_eq!(pos.z, 15);
+    }
+
+    fn pos(x: i32, y: i32, z: i32) -> BlockPos {
+        BlockPos { x, y, z }
+    }
+
+    fn assert_unique(positions: &[BlockPos]) {
+        let unique: HashSet<_> = positions.iter().copied().collect();
+        assert_eq!(unique.len(), positions.len());
     }
 }

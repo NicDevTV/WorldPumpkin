@@ -93,7 +93,6 @@ impl Plugin for WorldPumpkin {
             EventPriority::High,
             true,
         )?;
-
         let state = Arc::clone(&self.state);
         let queue = Arc::clone(&self.queue);
         context.schedule_repeating_task(1, 1, move |server| {

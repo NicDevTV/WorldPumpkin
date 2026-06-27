@@ -10,6 +10,7 @@ pub const CONFIG_FILE_NAME: &str = "config.toml";
 
 pub const PERM_SET: &str = "WorldPumpkin:command.set";
 pub const PERM_REPLACE: &str = "WorldPumpkin:command.replace";
+pub const PERM_WALLS: &str = "WorldPumpkin:command.walls";
 pub const PERM_POS: &str = "WorldPumpkin:command.pos";
 pub const PERM_UNDO: &str = "WorldPumpkin:command.undo";
 pub const PERM_REDO: &str = "WorldPumpkin:command.redo";
@@ -33,6 +34,11 @@ pub const PERMISSION_NODES: &[PermissionNode] = &[
     PermissionNode {
         node: PERM_REPLACE,
         description: "Allows replacing blocks in a WorldPumpkin selection.",
+        default_op: true,
+    },
+    PermissionNode {
+        node: PERM_WALLS,
+        description: "Allows building WorldPumpkin selection walls.",
         default_op: true,
     },
     PermissionNode {
