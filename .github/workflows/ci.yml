@@ -47,3 +47,4 @@ jobs:
           name: world-pumpkin-wasm
           path: target/wasm32-wasip2/release/world_pumpkin.wasm
           if-no-files-found: error
+          retention-days: 3
