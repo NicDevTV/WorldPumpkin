@@ -26,56 +26,56 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Install Rust toolchain
+      - name: Check if nightly needs update
+        id: nightly
         run: |
-          rustup toolchain install nightly --profile minimal --target wasm32-wasip2 --component rustfmt --component clippy
-          rustup default nightly
+          if git rev-parse "$NIGHTLY_TAG" >/dev/null 2>&1; then
+            TAG_SHA=$(git rev-parse "$NIGHTLY_TAG")
+            echo "Tag SHA: $TAG_SHA"
+            echo "Current SHA: $GITHUB_SHA"
 
-      - name: Cache Cargo
-        uses: Swatinem/rust-cache@v2.9.1
-
-      - name: Check formatting
-        run: cargo fmt --all --check
-
-      - name: Lint
-        run: cargo clippy --locked --target wasm32-wasip2 --all-targets -- -D warnings
-
-      - name: Check Wasm build
-        run: cargo check --locked --target wasm32-wasip2
-
-      - name: Build release Wasm
-        run: cargo build --locked --release --target wasm32-wasip2
-
-      - name: Create release bundle
-        run: |
-          mkdir -p dist
-          cp "$PLUGIN_WASM" "dist/$ASSET_NAME"
-
-      - name: Check if nightly asset changed
-        id: wasm
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          NEW_SHA="$(sha256sum "dist/$ASSET_NAME" | cut -d ' ' -f 1)"
-          echo "new_sha=$NEW_SHA" >> "$GITHUB_OUTPUT"
-
-          if gh release view "$NIGHTLY_TAG" >/dev/null 2>&1; then
-            mkdir -p old
-            if gh release download "$NIGHTLY_TAG" --pattern "$ASSET_NAME" --dir old >/dev/null 2>&1; then
-              OLD_SHA="$(sha256sum "old/$ASSET_NAME" | cut -d ' ' -f 1)"
-              echo "old_sha=$OLD_SHA" >> "$GITHUB_OUTPUT"
-
-              if [ "$NEW_SHA" = "$OLD_SHA" ]; then
-                echo "changed=false" >> "$GITHUB_OUTPUT"
-                exit 0
-              fi
+            if [ "$TAG_SHA" = "$GITHUB_SHA" ]; then
+              echo "changed=false" >> "$GITHUB_OUTPUT"
+              exit 0
             fi
           fi
 
           echo "changed=true" >> "$GITHUB_OUTPUT"
 
+      - name: Install Rust toolchain
+        if: steps.nightly.outputs.changed == 'true'
+        run: |
+          rustup toolchain install nightly --profile minimal --target wasm32-wasip2 --component rustfmt --component clippy
+          rustup default nightly
+
+      - name: Cache Cargo
+        if: steps.nightly.outputs.changed == 'true'
+        uses: Swatinem/rust-cache@v2.9.1
+
+      - name: Check formatting
+        if: steps.nightly.outputs.changed == 'true'
+        run: cargo fmt --all --check
+
+      - name: Lint
+        if: steps.nightly.outputs.changed == 'true'
+        run: cargo clippy --locked --target wasm32-wasip2 --all-targets -- -D warnings
+
+      - name: Check Wasm build
+        if: steps.nightly.outputs.changed == 'true'
+        run: cargo check --locked --target wasm32-wasip2
+
+      - name: Build release Wasm
+        if: steps.nightly.outputs.changed == 'true'
+        run: cargo build --locked --release --target wasm32-wasip2
+
+      - name: Create release bundle
+        if: steps.nightly.outputs.changed == 'true'
+        run: |
+          mkdir -p dist
+          cp "$PLUGIN_WASM" "dist/$ASSET_NAME"
+
       - name: Update nightly tag
-        if: steps.wasm.outputs.changed == 'true'
+        if: steps.nightly.outputs.changed == 'true'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -84,7 +84,7 @@ jobs:
           git push origin "refs/tags/$NIGHTLY_TAG" --force
 
       - name: Publish or update nightly prerelease
-        if: steps.wasm.outputs.changed == 'true'
+        if: steps.nightly.outputs.changed == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
