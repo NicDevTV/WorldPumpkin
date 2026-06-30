@@ -91,23 +91,9 @@ jobs:
           GENERATED_ON="$(date -u '+%Y-%m-%d %H:%M UTC')"
           NOTES="Generated on: $GENERATED_ON"
 
-          if gh release view "$NIGHTLY_TAG" >/dev/null 2>&1; then
-            gh release edit "$NIGHTLY_TAG" \
-              --title "Nightly Build" \
-              --notes "$NOTES" \
-              --prerelease \
-              --latest=false
-
-            gh release delete-asset "$NIGHTLY_TAG" "$ASSET_NAME" -y || true
-
-            gh release upload "$NIGHTLY_TAG" \
-              "dist/$ASSET_NAME" \
-              --clobber
-          else
-            gh release create "$NIGHTLY_TAG" \
-              --title "Nightly Build" \
-              --notes "$NOTES" \
-              --prerelease \
-              --latest=false \
-              "dist/$ASSET_NAME"
-          fi
+          gh release create "$NIGHTLY_TAG" \
+            --title "Nightly Build" \
+            --notes "$NOTES" \
+            --prerelease \
+            --latest=false \
+            "dist/$ASSET_NAME"
