@@ -12,7 +12,7 @@ use crate::{
 };
 use pumpkin_plugin_api::{
     command::{Command, CommandError, CommandNode, CommandSender, ConsumedArgs},
-    command_wit::{ArgumentType, StringType},
+    command_wit::ArgumentType,
     commands::CommandHandler,
     Context, Server,
 };
@@ -23,8 +23,8 @@ pub(super) fn register(
     state: Arc<Mutex<PluginState>>,
     queue: Arc<Mutex<EditQueue>>,
 ) {
-    let pattern_arg = CommandNode::argument(ARG_PATTERN, &ArgumentType::String(StringType::Greedy))
-        .execute(SetCommand {
+    let pattern_arg =
+        CommandNode::argument(ARG_PATTERN, &ArgumentType::BlockState).execute(SetCommand {
             state: Arc::clone(&state),
             queue: Arc::clone(&queue),
         });

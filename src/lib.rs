@@ -21,7 +21,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 pub(crate) const PLUGIN_NAME: &str = "WorldPumpkin";
 pub(crate) const PLUGIN_VERSION: &str = env!("CARGO_PKG_VERSION");
-pub(crate) const PLUGIN_AUTHOR: &str = "NicDevTV";
+pub(crate) const PLUGIN_AUTHORS: &[&str] = &["NicDevTV"];
 pub(crate) const PLUGIN_DESCRIPTION: &str = "Fast world editing tools for Pumpkin servers.";
 pub(crate) const PUMPKIN_API_VERSION: &str = env!("WORLDPUMPKIN_PUMPKIN_API_VERSION");
 pub(crate) const PUMPKIN_API_REV: &str = env!("WORLDPUMPKIN_PUMPKIN_API_REV");
@@ -69,7 +69,10 @@ impl Plugin for WorldPumpkin {
         PluginMetadata {
             name: PLUGIN_NAME.to_owned(),
             version: PLUGIN_VERSION.to_owned(),
-            authors: vec![PLUGIN_AUTHOR.to_owned()],
+            authors: PLUGIN_AUTHORS
+                .iter()
+                .map(|author| (*author).to_owned())
+                .collect(),
             description: PLUGIN_DESCRIPTION.to_owned(),
             dependencies: vec![],
             permissions: vec![

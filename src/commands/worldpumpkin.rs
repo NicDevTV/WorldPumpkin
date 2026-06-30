@@ -6,7 +6,7 @@ use crate::{
     config::{Config, PERM_STATUS},
     engine::EditQueue,
     state::PluginState,
-    PLUGIN_VERSION, PUMPKIN_API_GIT, PUMPKIN_API_REV, PUMPKIN_API_VERSION,
+    PLUGIN_AUTHORS, PLUGIN_VERSION, PUMPKIN_API_GIT, PUMPKIN_API_REV, PUMPKIN_API_VERSION,
 };
 use pumpkin_plugin_api::{
     command::{Command, CommandError, CommandNode, CommandSender, ConsumedArgs},
@@ -70,7 +70,8 @@ impl CommandHandler for InfoCommand {
         send_ok(
             &sender,
             &format!(
-                "WorldPumpkin {PLUGIN_VERSION}. Pumpkin API {PUMPKIN_API_VERSION} ({short_rev}). Source: {PUMPKIN_API_GIT}.",
+                "\nVersion: {PLUGIN_VERSION}\nAuthors: {authors}\nPumpkin API: {PUMPKIN_API_VERSION} ({short_rev})\nSource: {PUMPKIN_API_GIT}",
+                authors = PLUGIN_AUTHORS.join(", "),
                 short_rev = short_rev(PUMPKIN_API_REV)
             ),
         );
@@ -97,7 +98,7 @@ impl CommandHandler for StatusCommand {
         send_ok(
             &sender,
             &format!(
-                "Status: {work}. Limit: {} blocks. Speed: {} blocks/tick. Fast edits: {}. Server: {:.1} TPS.",
+                "\nWork: {work}\nLimit: {} blocks\nSpeed: {} blocks/tick\nFast edits: {}\nServer: {:.1} TPS",
                 config.max_blocks_per_operation,
                 config.blocks_per_tick,
                 enabled_text(config.fast_mode),
