@@ -29,12 +29,23 @@ jobs:
       - name: Check if nightly needs update
         id: nightly
         run: |
-          if git rev-parse "$NIGHTLY_TAG" >/dev/null 2>&1; then
-            TAG_SHA=$(git rev-parse "$NIGHTLY_TAG")
-            echo "Tag SHA: $TAG_SHA"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if git rev-parse "$NIGHTLY_TAG^{commit}" >/dev/null 2>&1; then
+            NIGHTLY_SHA="$(git rev-parse "$NIGHTLY_TAG^{commit}")"
+            echo "Nightly SHA: $NIGHTLY_SHA"
             echo "Current SHA: $GITHUB_SHA"
 
-            if [ "$TAG_SHA" = "$GITHUB_SHA" ]; then
+            if [ "$NIGHTLY_SHA" = "$GITHUB_SHA" ]; then
+              echo "changed=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+
+            if git diff --quiet "$NIGHTLY_SHA..$GITHUB_SHA" -- Cargo.toml Cargo.lock src; then
+              echo "No Wasm inputs changed since last nightly"
               echo "changed=false" >> "$GITHUB_OUTPUT"
               exit 0
             fi
@@ -71,8 +82,18 @@ jobs:
       - name: Create release bundle
         if: steps.nightly.outputs.changed == 'true'
         run: |
+          test -f "$PLUGIN_WASM"
           mkdir -p dist
           cp "$PLUGIN_WASM" "dist/$ASSET_NAME"
+
+      - name: Delete existing nightly prerelease
+        if: steps.nightly.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$NIGHTLY_TAG" >/dev/null 2>&1; then
+            gh release delete "$NIGHTLY_TAG" -y --cleanup-tag
+          fi
 
       - name: Update nightly tag
         if: steps.nightly.outputs.changed == 'true'
@@ -83,7 +104,7 @@ jobs:
           git tag -f "$NIGHTLY_TAG" "$GITHUB_SHA"
           git push origin "refs/tags/$NIGHTLY_TAG" --force
 
-      - name: Publish or update nightly prerelease
+      - name: Publish nightly prerelease
         if: steps.nightly.outputs.changed == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
