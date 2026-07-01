@@ -8,7 +8,6 @@ on:
 env:
   CARGO_TERM_COLOR: always
   PLUGIN_WASM: target/wasm32-wasip2/release/world_pumpkin.wasm
-  NIGHTLY_TAG: nightly
   ASSET_NAME: world_pumpkin-nightly.wasm
 
 permissions:
@@ -31,17 +30,27 @@ jobs:
 
       - name: Check if nightly needs update
         id: nightly
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             echo "changed=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
-          git fetch origin "refs/tags/$NIGHTLY_TAG:refs/tags/$NIGHTLY_TAG" || true
+          LATEST_NIGHTLY_TAG="$(gh release list \
+            --limit 100 \
+            --json isPrerelease,tagName,createdAt \
+            --jq '[.[] | select(.isPrerelease and (.tagName | startswith("nightly-")))] | sort_by(.createdAt) | reverse | .[0].tagName // ""')"
 
-          if git rev-parse "$NIGHTLY_TAG^{commit}" >/dev/null 2>&1; then
-            NIGHTLY_SHA="$(git rev-parse "$NIGHTLY_TAG^{commit}")"
+          if [ -n "$LATEST_NIGHTLY_TAG" ]; then
+            git fetch origin "refs/tags/$LATEST_NIGHTLY_TAG:refs/tags/$LATEST_NIGHTLY_TAG" || true
+          fi
 
+          if [ -n "$LATEST_NIGHTLY_TAG" ] && git rev-parse "$LATEST_NIGHTLY_TAG^{commit}" >/dev/null 2>&1; then
+            NIGHTLY_SHA="$(git rev-parse "$LATEST_NIGHTLY_TAG^{commit}")"
+
+            echo "Latest nightly tag: $LATEST_NIGHTLY_TAG"
             echo "Nightly SHA: $NIGHTLY_SHA"
             echo "Current SHA: $GITHUB_SHA"
 
@@ -92,16 +101,35 @@ jobs:
           mkdir -p dist
           cp "$PLUGIN_WASM" "dist/$ASSET_NAME"
 
-      - name: Move nightly tag
+      - name: Delete old nightly releases and tags
+        if: steps.nightly.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          OLD_TAGS="$(gh release list \
+            --limit 100 \
+            --json tagName,isPrerelease \
+            --jq '.[] | select(.isPrerelease and (.tagName | startswith("nightly-"))) | .tagName')"
+
+          for TAG in $OLD_TAGS; do
+            echo "Deleting old nightly release and tag: $TAG"
+            gh release delete "$TAG" --yes --cleanup-tag || true
+          done
+
+      - name: Create nightly tag
+        id: nightly_tag
         if: steps.nightly.outputs.changed == 'true'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          git tag -f "$NIGHTLY_TAG" "$GITHUB_SHA"
-          git push origin -f "refs/tags/$NIGHTLY_TAG"
+          NIGHTLY_TAG="nightly-$(date -u '+%Y%m%d-%H%M%S')-${GITHUB_SHA::7}"
+          echo "tag=$NIGHTLY_TAG" >> "$GITHUB_OUTPUT"
 
-      - name: Publish or update nightly prerelease
+          git tag "$NIGHTLY_TAG" "$GITHUB_SHA"
+          git push origin "refs/tags/$NIGHTLY_TAG"
+
+      - name: Publish nightly prerelease
         if: steps.nightly.outputs.changed == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
@@ -109,19 +137,9 @@ jobs:
           GENERATED_ON="$(date -u '+%Y-%m-%d %H:%M UTC')"
           NOTES="Generated on: $GENERATED_ON"$'\n'"Commit: $GITHUB_SHA"
 
-          if gh release view "$NIGHTLY_TAG" >/dev/null 2>&1; then
-            gh release edit "$NIGHTLY_TAG" \
-              --title "Nightly Build" \
-              --notes "$NOTES" \
-              --prerelease \
-              --latest=false
-
-            gh release upload "$NIGHTLY_TAG" "dist/$ASSET_NAME" --clobber
-          else
-            gh release create "$NIGHTLY_TAG" \
-              --title "Nightly Build" \
-              --notes "$NOTES" \
-              --prerelease \
-              --latest=false \
-              "dist/$ASSET_NAME"
-          fi
+          gh release create "${{ steps.nightly_tag.outputs.tag }}" \
+            --title "Nightly Build" \
+            --notes "$NOTES" \
+            --prerelease \
+            --latest=false \
+            "dist/$ASSET_NAME"
