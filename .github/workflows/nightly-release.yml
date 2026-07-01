@@ -28,10 +28,17 @@ jobs:
 
       - name: Check if nightly needs update
         id: nightly
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             echo "changed=true" >> "$GITHUB_OUTPUT"
             exit 0
+          fi
+
+          RELEASE_EXISTS=false
+          if gh release view "$NIGHTLY_TAG" >/dev/null 2>&1; then
+            RELEASE_EXISTS=true
           fi
 
           if git rev-parse "$NIGHTLY_TAG^{commit}" >/dev/null 2>&1; then
@@ -39,12 +46,12 @@ jobs:
             echo "Nightly SHA: $NIGHTLY_SHA"
             echo "Current SHA: $GITHUB_SHA"
 
-            if [ "$NIGHTLY_SHA" = "$GITHUB_SHA" ]; then
+            if [ "$NIGHTLY_SHA" = "$GITHUB_SHA" ] && [ "$RELEASE_EXISTS" = "true" ]; then
               echo "changed=false" >> "$GITHUB_OUTPUT"
               exit 0
             fi
 
-            if git diff --quiet "$NIGHTLY_SHA..$GITHUB_SHA" -- Cargo.toml Cargo.lock src; then
+            if [ "$RELEASE_EXISTS" = "true" ] && git diff --quiet "$NIGHTLY_SHA..$GITHUB_SHA" -- Cargo.toml Cargo.lock src; then
               echo "No Wasm inputs changed since last nightly"
               echo "changed=false" >> "$GITHUB_OUTPUT"
               exit 0
@@ -101,6 +108,8 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
+          git push origin ":refs/tags/$NIGHTLY_TAG" || true
+          git tag -d "$NIGHTLY_TAG" || true
           git tag -f "$NIGHTLY_TAG" "$GITHUB_SHA"
           git push origin "refs/tags/$NIGHTLY_TAG" --force
 
