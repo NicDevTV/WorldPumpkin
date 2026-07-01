@@ -123,7 +123,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          NIGHTLY_TAG="nightly-$(date -u '+%Y%m%d-%H%M%S')-${GITHUB_SHA::7}"
+          NIGHTLY_TAG="nightly-$(date -u +%Y%m%d)"
           echo "tag=$NIGHTLY_TAG" >> "$GITHUB_OUTPUT"
 
           git tag "$NIGHTLY_TAG" "$GITHUB_SHA"
