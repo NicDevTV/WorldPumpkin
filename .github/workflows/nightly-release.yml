@@ -9,7 +9,7 @@ on:
 env:
   CARGO_TERM_COLOR: always
   PLUGIN_WASM: target/wasm32-wasip2/release/world_pumpkin.wasm
-  NIGHTLY_TAG: nightly
+  NIGHTLY_TAG_PREFIX: nightly
   ASSET_NAME: world_pumpkin-nightly.wasm
 
 permissions:
@@ -36,22 +36,28 @@ jobs:
             exit 0
           fi
 
-          RELEASE_EXISTS=false
-          if gh release view "$NIGHTLY_TAG" >/dev/null 2>&1; then
-            RELEASE_EXISTS=true
+          LATEST_NIGHTLY_TAG="$(gh release list \
+            --limit 50 \
+            --json isPrerelease,tagName \
+            --jq '.[] | select(.isPrerelease and (.tagName | startswith("nightly-"))) | .tagName' \
+            | head -n 1)"
+
+          if [ -n "$LATEST_NIGHTLY_TAG" ]; then
+            git fetch origin "refs/tags/$LATEST_NIGHTLY_TAG:refs/tags/$LATEST_NIGHTLY_TAG" || true
           fi
 
-          if git rev-parse "$NIGHTLY_TAG^{commit}" >/dev/null 2>&1; then
-            NIGHTLY_SHA="$(git rev-parse "$NIGHTLY_TAG^{commit}")"
+          if [ -n "$LATEST_NIGHTLY_TAG" ] && git rev-parse "$LATEST_NIGHTLY_TAG^{commit}" >/dev/null 2>&1; then
+            NIGHTLY_SHA="$(git rev-parse "$LATEST_NIGHTLY_TAG^{commit}")"
+            echo "Latest nightly tag: $LATEST_NIGHTLY_TAG"
             echo "Nightly SHA: $NIGHTLY_SHA"
             echo "Current SHA: $GITHUB_SHA"
 
-            if [ "$NIGHTLY_SHA" = "$GITHUB_SHA" ] && [ "$RELEASE_EXISTS" = "true" ]; then
+            if [ "$NIGHTLY_SHA" = "$GITHUB_SHA" ]; then
               echo "changed=false" >> "$GITHUB_OUTPUT"
               exit 0
             fi
 
-            if [ "$RELEASE_EXISTS" = "true" ] && git diff --quiet "$NIGHTLY_SHA..$GITHUB_SHA" -- Cargo.toml Cargo.lock src; then
+            if git diff --quiet "$NIGHTLY_SHA..$GITHUB_SHA" -- Cargo.toml Cargo.lock src; then
               echo "No Wasm inputs changed since last nightly"
               echo "changed=false" >> "$GITHUB_OUTPUT"
               exit 0
@@ -93,25 +99,17 @@ jobs:
           mkdir -p dist
           cp "$PLUGIN_WASM" "dist/$ASSET_NAME"
 
-      - name: Delete existing nightly prerelease
-        if: steps.nightly.outputs.changed == 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          if gh release view "$NIGHTLY_TAG" >/dev/null 2>&1; then
-            gh release delete "$NIGHTLY_TAG" -y --cleanup-tag
-          fi
-
-      - name: Update nightly tag
+      - name: Create nightly tag
+        id: nightly_tag
         if: steps.nightly.outputs.changed == 'true'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          git push origin ":refs/tags/$NIGHTLY_TAG" || true
-          git tag -d "$NIGHTLY_TAG" || true
-          git tag -f "$NIGHTLY_TAG" "$GITHUB_SHA"
-          git push origin "refs/tags/$NIGHTLY_TAG" --force
+          NIGHTLY_TAG="$NIGHTLY_TAG_PREFIX-$(date -u '+%Y%m%d-%H%M%S')-${GITHUB_SHA::7}"
+          echo "tag=$NIGHTLY_TAG" >> "$GITHUB_OUTPUT"
+          git tag "$NIGHTLY_TAG" "$GITHUB_SHA"
+          git push origin "refs/tags/$NIGHTLY_TAG"
 
       - name: Publish nightly prerelease
         if: steps.nightly.outputs.changed == 'true'
@@ -121,8 +119,8 @@ jobs:
           GENERATED_ON="$(date -u '+%Y-%m-%d %H:%M UTC')"
           NOTES="Generated on: $GENERATED_ON"
 
-          gh release create "$NIGHTLY_TAG" \
-            --title "Nightly Build" \
+          gh release create "${{ steps.nightly_tag.outputs.tag }}" \
+            --title "Nightly Build ${{ steps.nightly_tag.outputs.tag }}" \
             --notes "$NOTES" \
             --prerelease \
             --latest=false \
