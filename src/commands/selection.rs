@@ -233,7 +233,7 @@ fn expand_selection(
             }
         }
         ExpandRequest::Vertical => {
-            let world = world.ok_or_else(|| "Only players in a world can expand vertically.")?;
+            let world = world.ok_or("Only players in a world can expand vertically.")?;
             cuboid.min.y = world.get_min_y();
             cuboid.max.y = world_max_y(world);
         }
