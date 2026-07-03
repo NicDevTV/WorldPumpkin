@@ -50,9 +50,6 @@ Undo and redo are per player and must be used in the same world as the original 
 
 | Command | Description |
 | --- | --- |
-| `/worldpumpkin info` | Show plugin version, authors, and Pumpkin API source. |
-| `/worldpumpkin status` | Show queue status, configured limits, edit speed, fast mode, and server TPS. |
-| `/worldpumpkin reload` | Reload `config.toml`. |
-| `/wp info` | Alias for `/worldpumpkin info`. |
-| `/wp status` | Alias for `/worldpumpkin status`. |
-| `/wp reload` | Alias for `/worldpumpkin reload`. |
+| `/worldpumpkin info`, `/wp info` | Show plugin version, authors, and Pumpkin API source. |
+| `/worldpumpkin status`, `/wp status` | Show queue status, configured limits, edit speed, fast mode, and server TPS. |
+| `/worldpumpkin reload`, `/wp reload` | Reload `config.toml`. |

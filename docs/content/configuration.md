@@ -20,6 +20,8 @@ max_history_entries = 15
 max_history_blocks = 500000
 fast_mode = true
 notify_clients = true
+update_check_enabled = true
+update_notify_on_join = true
 ```
 
 ## Options
@@ -34,6 +36,8 @@ notify_clients = true
 | `max_history_blocks` | `500000` | Maximum number of history blocks kept per player. |
 | `fast_mode` | `true` | Uses direct chunk writes and disables physics side effects where possible. |
 | `notify_clients` | `true` | Sends client updates for changed blocks. |
+| `update_check_enabled` | `true` | Checks GitHub Releases for a newer WorldPumpkin version on startup. This only reports status and never replaces files. |
+| `update_notify_on_join` | `true` | Sends the update notice to joining users with `WorldPumpkin:update.notify` when an update is known. |
 
 Use `/worldpumpkin reload` or `/wp reload` after editing the file.
 
@@ -50,3 +54,4 @@ Use `/worldpumpkin reload` or `/wp reload` after editing the file.
 | `WorldPumpkin:command.reload` | OP | Allows config reload. |
 | `WorldPumpkin:command.status` | OP | Allows status and info commands. |
 | `WorldPumpkin:limit.bypass` | Off | Allows bypassing configured edit limits. |
+| `WorldPumpkin:update.notify` | OP | Receives update notifications on join. |

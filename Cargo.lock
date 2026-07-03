@@ -1673,6 +1673,8 @@ version = "0.0.2"
 dependencies = [
  "pumpkin-data",
  "pumpkin-plugin-api",
+ "serde_json",
+ "ureq",
 ]
 
 [[package]]

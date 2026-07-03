@@ -17,6 +17,7 @@ pub const PERM_REDO: &str = "WorldPumpkin:command.redo";
 pub const PERM_RELOAD: &str = "WorldPumpkin:command.reload";
 pub const PERM_STATUS: &str = "WorldPumpkin:command.status";
 pub const PERM_LIMIT_BYPASS: &str = "WorldPumpkin:limit.bypass";
+pub const PERM_UPDATE_NOTIFY: &str = "WorldPumpkin:update.notify";
 
 #[derive(Clone, Copy)]
 pub struct PermissionNode {
@@ -71,6 +72,11 @@ pub const PERMISSION_NODES: &[PermissionNode] = &[
         description: "Allows bypassing configured WorldPumpkin edit limits.",
         default_op: false,
     },
+    PermissionNode {
+        node: PERM_UPDATE_NOTIFY,
+        description: "Receives WorldPumpkin update notifications on join.",
+        default_op: true,
+    },
 ];
 
 #[derive(Clone, Debug)]
@@ -84,6 +90,8 @@ pub struct Config {
     /// Fast mode uses direct chunk writes and disables physics side effects where possible.
     pub fast_mode: bool,
     pub notify_clients: bool,
+    pub update_check_enabled: bool,
+    pub update_notify_on_join: bool,
 }
 
 impl Default for Config {
@@ -97,6 +105,8 @@ impl Default for Config {
             max_history_blocks: 500_000,
             fast_mode: true,
             notify_clients: true,
+            update_check_enabled: true,
+            update_notify_on_join: true,
         }
     }
 }
@@ -170,6 +180,8 @@ max_history_entries = {}
 max_history_blocks = {}
 fast_mode = {}
 notify_clients = {}
+update_check_enabled = {}
+update_notify_on_join = {}
 ",
         config.max_blocks_per_operation,
         config.blocks_per_tick,
@@ -178,7 +190,9 @@ notify_clients = {}
         config.max_history_entries,
         config.max_history_blocks,
         config.fast_mode,
-        config.notify_clients
+        config.notify_clients,
+        config.update_check_enabled,
+        config.update_notify_on_join
     ))
 }
 
@@ -206,6 +220,8 @@ fn parse_config(raw: &str) -> Result<Config, String> {
             "max_history_blocks" => config.max_history_blocks = parse_usize(value, key)?,
             "fast_mode" => config.fast_mode = parse_bool(value, key)?,
             "notify_clients" => config.notify_clients = parse_bool(value, key)?,
+            "update_check_enabled" => config.update_check_enabled = parse_bool(value, key)?,
+            "update_notify_on_join" => config.update_notify_on_join = parse_bool(value, key)?,
             _ => {}
         }
     }
@@ -235,7 +251,7 @@ fn parse_bool(value: &str, key: &str) -> Result<bool, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_config, Config, PERMISSION_NODES, PERM_LIMIT_BYPASS};
+    use super::{parse_config, Config, PERMISSION_NODES, PERM_LIMIT_BYPASS, PERM_UPDATE_NOTIFY};
 
     #[test]
     fn default_config_is_valid() {
@@ -248,6 +264,8 @@ mod tests {
 
         assert!(config.fast_mode);
         assert!(config.notify_clients);
+        assert!(config.update_check_enabled);
+        assert!(config.update_notify_on_join);
     }
 
     #[test]
@@ -262,6 +280,8 @@ max_history_entries = 15
 max_history_blocks = 500000
 allow_chunk_direct_writes = true
 notify_clients = true
+update_check_enabled = false
+update_notify_on_join = false
 skip_neighbor_updates = true
 skip_block_callbacks = true
 skip_block_drops = true
@@ -272,6 +292,8 @@ skip_redstone_wire_state_replacement = true
 
         assert!(config.fast_mode);
         assert!(config.notify_clients);
+        assert!(!config.update_check_enabled);
+        assert!(!config.update_notify_on_join);
     }
 
     #[test]
@@ -290,6 +312,7 @@ notify_clients = false
         );
         assert_eq!(config.blocks_per_tick, 4096);
         assert!(!config.notify_clients);
+        assert!(config.update_check_enabled);
     }
 
     #[test]
@@ -325,5 +348,15 @@ notify_clients = false
             .unwrap();
 
         assert!(!bypass.default_op);
+    }
+
+    #[test]
+    fn update_notify_is_granted_to_ops_by_default() {
+        let notify = PERMISSION_NODES
+            .iter()
+            .find(|node| node.node == PERM_UPDATE_NOTIFY)
+            .unwrap();
+
+        assert!(notify.default_op);
     }
 }

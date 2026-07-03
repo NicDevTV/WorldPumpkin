@@ -96,7 +96,7 @@ a:hover {
   color: var(--muted);
 }
 
-.nav a.router-link-active {
+.nav a.router-link-exact-active {
   color: var(--text);
   background: #222830;
 }

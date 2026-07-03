@@ -6,11 +6,12 @@ mod config;
 mod engine;
 mod messages;
 mod state;
+mod updater;
 
 use config::{Config, PERMISSION_NODES};
 use engine::EditQueue;
 use pumpkin_plugin_api::{
-    events::{EventPriority, PlayerCommandSendEvent},
+    events::{EventPriority, PlayerCommandSendEvent, PlayerJoinEvent},
     permission::{Permission, PermissionDefault, PermissionLevel},
     permissions, register_plugin,
     scheduler::SchedulerExt,
@@ -18,6 +19,7 @@ use pumpkin_plugin_api::{
 };
 use state::PluginState;
 use std::sync::{Arc, Mutex, OnceLock};
+use updater::UpdateState;
 
 pub(crate) const PLUGIN_NAME: &str = "WorldPumpkin";
 pub(crate) const PLUGIN_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -48,21 +50,29 @@ const PUMPKIN_BANNER: &[&str] = &[
 
 static STATE: OnceLock<Arc<Mutex<PluginState>>> = OnceLock::new();
 static QUEUE: OnceLock<Arc<Mutex<EditQueue>>> = OnceLock::new();
+static UPDATE_STATE: OnceLock<Arc<Mutex<UpdateState>>> = OnceLock::new();
 
 struct WorldPumpkin {
     state: Arc<Mutex<PluginState>>,
     queue: Arc<Mutex<EditQueue>>,
+    update_state: Arc<Mutex<UpdateState>>,
 }
 
 impl Plugin for WorldPumpkin {
     fn new() -> Self {
         let state = Arc::new(Mutex::new(PluginState::new(Config::default())));
         let queue = Arc::new(Mutex::new(EditQueue::default()));
+        let update_state = Arc::new(Mutex::new(UpdateState::default()));
 
         let _ = STATE.set(Arc::clone(&state));
         let _ = QUEUE.set(Arc::clone(&queue));
+        let _ = UPDATE_STATE.set(Arc::clone(&update_state));
 
-        Self { state, queue }
+        Self {
+            state,
+            queue,
+            update_state,
+        }
     }
 
     fn metadata(&self) -> PluginMetadata {
@@ -78,6 +88,7 @@ impl Plugin for WorldPumpkin {
             permissions: vec![
                 permissions::FS_READ_DATA.to_owned(),
                 permissions::FS_WRITE_DATA.to_owned(),
+                permissions::HTTP_OUTBOUND.to_owned(),
             ],
         }
     }
@@ -96,6 +107,14 @@ impl Plugin for WorldPumpkin {
             EventPriority::High,
             true,
         )?;
+        context.register_event_handler::<PlayerJoinEvent, _>(
+            updater::UpdateJoinHandler {
+                config_state: Arc::clone(&self.state),
+                update_state: Arc::clone(&self.update_state),
+            },
+            EventPriority::Normal,
+            false,
+        )?;
         let state = Arc::clone(&self.state);
         let queue = Arc::clone(&self.queue);
         context.schedule_repeating_task(1, 1, move |server| {
@@ -104,6 +123,8 @@ impl Plugin for WorldPumpkin {
         });
 
         print_startup_banner();
+        let config = self.state.lock().unwrap().config().clone();
+        updater::check_on_startup(&config, &self.update_state);
         Ok(())
     }
 }
