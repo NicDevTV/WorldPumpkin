@@ -4,6 +4,7 @@
 mod pos;
 mod redo;
 mod replace;
+mod selection;
 mod set;
 mod undo;
 mod walls;
@@ -37,6 +38,10 @@ const ARG_TO: &str = "to";
 pub fn register(context: &Context, state: Arc<Mutex<PluginState>>, queue: Arc<Mutex<EditQueue>>) {
     pos::register(context, Arc::clone(&state), SelectionSlot::Pos1);
     pos::register(context, Arc::clone(&state), SelectionSlot::Pos2);
+    selection::register_chunk(context, Arc::clone(&state));
+    selection::register_expand(context, Arc::clone(&state));
+    selection::register_hpos(context, Arc::clone(&state), SelectionSlot::Pos1);
+    selection::register_hpos(context, Arc::clone(&state), SelectionSlot::Pos2);
     set::register(context, Arc::clone(&state), Arc::clone(&queue));
     replace::register(context, Arc::clone(&state), Arc::clone(&queue));
     walls::register(context, Arc::clone(&state), Arc::clone(&queue));
@@ -76,8 +81,20 @@ impl EventHandler<PlayerCommandSendEvent> for DoubleSlashCommandHandler {
 
 fn is_worldpumpkin_command(command: &str) -> bool {
     matches!(
-        command.split_whitespace().next(),
-        Some("pos1" | "pos2" | "set" | "replace" | "walls" | "undo" | "redo")
+        command.trim_start_matches('/').split_whitespace().next(),
+        Some(
+            "pos1"
+                | "pos2"
+                | "hpos1"
+                | "hpos2"
+                | "chunk"
+                | "expand"
+                | "set"
+                | "replace"
+                | "walls"
+                | "undo"
+                | "redo"
+        )
     )
 }
 
@@ -87,10 +104,30 @@ fn handle_double_slash_command(
     state: &Arc<Mutex<PluginState>>,
     queue: &Arc<Mutex<EditQueue>>,
 ) -> Result<(), String> {
-    let mut parts = command.split_whitespace();
+    let mut parts = command.trim_start_matches('/').split_whitespace();
     match parts.next() {
         Some("pos1") => handle_player_pos(player, state, SelectionSlot::Pos1),
         Some("pos2") => handle_player_pos(player, state, SelectionSlot::Pos2),
+        Some("hpos1") => {
+            require_player_permission(player, PERM_POS)?;
+            ensure_no_extra_args(parts)?;
+            selection::handle_player_hpos(player, state, SelectionSlot::Pos1)
+        }
+        Some("hpos2") => {
+            require_player_permission(player, PERM_POS)?;
+            ensure_no_extra_args(parts)?;
+            selection::handle_player_hpos(player, state, SelectionSlot::Pos2)
+        }
+        Some("chunk") => {
+            require_player_permission(player, PERM_POS)?;
+            ensure_no_extra_args(parts)?;
+            selection::handle_player_chunk(player, state)
+        }
+        Some("expand") => {
+            require_player_permission(player, PERM_POS)?;
+            let args = parts.collect::<Vec<_>>().join(" ");
+            selection::handle_player_expand(player, state, &args)
+        }
         Some("set") => {
             require_player_permission(player, PERM_SET)?;
             let to = parse_required_pattern(&mut parts, "Usage: //set <block>")?;
