@@ -27,6 +27,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           fetch-depth: 0
+          ref: ${{ github.event.repository.default_branch }}
 
       - name: Check if nightly needs update
         id: nightly
@@ -47,19 +48,21 @@ jobs:
             git fetch origin "refs/tags/$LATEST_NIGHTLY_TAG:refs/tags/$LATEST_NIGHTLY_TAG" || true
           fi
 
+          CURRENT_SHA="$(git rev-parse HEAD)"
+
           if [ -n "$LATEST_NIGHTLY_TAG" ] && git rev-parse "$LATEST_NIGHTLY_TAG^{commit}" >/dev/null 2>&1; then
             NIGHTLY_SHA="$(git rev-parse "$LATEST_NIGHTLY_TAG^{commit}")"
 
             echo "Latest nightly tag: $LATEST_NIGHTLY_TAG"
             echo "Nightly SHA: $NIGHTLY_SHA"
-            echo "Current SHA: $GITHUB_SHA"
+            echo "Current SHA: $CURRENT_SHA"
 
-            if [ "$NIGHTLY_SHA" = "$GITHUB_SHA" ]; then
+            if [ "$NIGHTLY_SHA" = "$CURRENT_SHA" ]; then
               echo "changed=false" >> "$GITHUB_OUTPUT"
               exit 0
             fi
 
-            if git diff --quiet "$NIGHTLY_SHA..$GITHUB_SHA" -- Cargo.toml Cargo.lock src; then
+            if git diff --quiet "$NIGHTLY_SHA..$CURRENT_SHA" -- Cargo.toml Cargo.lock src; then
               echo "No Wasm inputs changed since last nightly"
               echo "changed=false" >> "$GITHUB_OUTPUT"
               exit 0
@@ -101,21 +104,6 @@ jobs:
           mkdir -p dist
           cp "$PLUGIN_WASM" "dist/$ASSET_NAME"
 
-      - name: Delete old nightly releases and tags
-        if: steps.nightly.outputs.changed == 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          OLD_TAGS="$(gh release list \
-            --limit 100 \
-            --json tagName,isPrerelease \
-            --jq '.[] | select(.isPrerelease and (.tagName | startswith("nightly-"))) | .tagName')"
-
-          for TAG in $OLD_TAGS; do
-            echo "Deleting old nightly release and tag: $TAG"
-            gh release delete "$TAG" --yes --cleanup-tag || true
-          done
-
       - name: Create nightly tag
         id: nightly_tag
         if: steps.nightly.outputs.changed == 'true'
@@ -123,10 +111,12 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          NIGHTLY_TAG="nightly-$(date -u +%Y%m%d)"
+          CURRENT_SHA="$(git rev-parse HEAD)"
+          NIGHTLY_TAG="nightly-$(date -u +%Y%m%d)-${CURRENT_SHA::7}"
+
           echo "tag=$NIGHTLY_TAG" >> "$GITHUB_OUTPUT"
 
-          git tag "$NIGHTLY_TAG" "$GITHUB_SHA"
+          git tag "$NIGHTLY_TAG" "$CURRENT_SHA"
           git push origin "refs/tags/$NIGHTLY_TAG"
 
       - name: Publish nightly prerelease
@@ -135,7 +125,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           GENERATED_ON="$(date -u '+%Y-%m-%d %H:%M UTC')"
-          NOTES="Generated on: $GENERATED_ON"$'\n'"Commit: $GITHUB_SHA"
+          CURRENT_SHA="$(git rev-parse HEAD)"
+          NOTES="Generated on: $GENERATED_ON"$'\n'"Commit: $CURRENT_SHA"
 
           gh release create "${{ steps.nightly_tag.outputs.tag }}" \
             --title "Nightly Build" \
