@@ -8,7 +8,7 @@ on:
 env:
   CARGO_TERM_COLOR: always
   PLUGIN_WASM: target/wasm32-wasip2/release/world_pumpkin.wasm
-  ASSET_NAME: world_pumpkin-nightly.wasm
+  ASSET_NAME: world_pumpkin.wasm
 
 permissions:
   contents: write
@@ -27,28 +27,13 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Check if nightly is up to date
-        id: nightly
+      - name: Check if build is needed
+        id: check
         run: |
-          CURRENT_SHA="$(git rev-parse HEAD)"
-
-          if git ls-remote --tags origin nightly | grep -q .; then
-            git fetch origin tag nightly
-            NIGHTLY_SHA="$(git rev-parse nightly)"
-
-            echo "Current: $CURRENT_SHA"
-            echo "Nightly: $NIGHTLY_SHA"
-
-            if [ "$CURRENT_SHA" = "$NIGHTLY_SHA" ]; then
-              echo "changed=false" >> "$GITHUB_OUTPUT"
-              exit 0
-            fi
-          fi
-
           echo "changed=true" >> "$GITHUB_OUTPUT"
 
       - name: Install Rust
-        if: steps.nightly.outputs.changed == 'true'
+        if: steps.check.outputs.changed == 'true'
         run: |
           rustup toolchain install nightly \
             --profile minimal \
@@ -58,61 +43,53 @@ jobs:
           rustup default nightly
 
       - name: Cache Cargo
-        if: steps.nightly.outputs.changed == 'true'
+        if: steps.check.outputs.changed == 'true'
         uses: Swatinem/rust-cache@v2
 
       - name: Check formatting
-        if: steps.nightly.outputs.changed == 'true'
+        if: steps.check.outputs.changed == 'true'
         run: cargo fmt --all --check
 
       - name: Lint
-        if: steps.nightly.outputs.changed == 'true'
+        if: steps.check.outputs.changed == 'true'
         run: cargo clippy --locked --target wasm32-wasip2 --all-targets -- -D warnings
 
       - name: Check build
-        if: steps.nightly.outputs.changed == 'true'
+        if: steps.check.outputs.changed == 'true'
         run: cargo check --locked --target wasm32-wasip2
 
       - name: Build
-        if: steps.nightly.outputs.changed == 'true'
+        if: steps.check.outputs.changed == 'true'
         run: cargo build --locked --release --target wasm32-wasip2
 
       - name: Prepare artifact
-        if: steps.nightly.outputs.changed == 'true'
+        if: steps.check.outputs.changed == 'true'
         run: |
           mkdir -p dist
           cp "$PLUGIN_WASM" "dist/$ASSET_NAME"
 
-      - name: Recreate nightly tag
-        if: steps.nightly.outputs.changed == 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: Create unique tag
+        if: steps.check.outputs.changed == 'true'
         run: |
+          TAG="nightly-$(date -u +%Y%m%d-%H%M%S)-${GITHUB_SHA::7}"
+
+          echo "TAG=$TAG" >> $GITHUB_ENV
+
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          gh release delete nightly -y || true
+          git tag "$TAG"
+          git push origin "$TAG"
 
-          git tag -d nightly 2>/dev/null || true
-          git push origin :refs/tags/nightly || true
-
-          git tag nightly
-          git push origin nightly
-
-      - name: Create nightly release
-        if: steps.nightly.outputs.changed == 'true'
+      - name: Create release
+        if: steps.check.outputs.changed == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          NOTES=$(cat <<EOF
-          Commit: $(git rev-parse HEAD)
-          Generated: $(date -u '+%Y-%m-%d %H:%M UTC')
-          EOF
-          )
-
-          gh release create nightly \
+          gh release create "$TAG" \
             "dist/$ASSET_NAME" \
-            --title "Nightly Build" \
-            --notes "$NOTES" \
+            --title "Nightly Build $TAG" \
+            --notes "Commit: $(git rev-parse HEAD)
+Generated: $(date -u '+%Y-%m-%d %H:%M UTC')" \
             --prerelease \
             --latest=false
