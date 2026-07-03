@@ -8,7 +8,7 @@ on:
 env:
   CARGO_TERM_COLOR: always
   PLUGIN_WASM: target/wasm32-wasip2/release/world_pumpkin.wasm
-  ASSET_NAME: world_pumpkin.wasm
+  ASSET_NAME: world_pumpkin-nightly.wasm
 
 permissions:
   contents: write
@@ -27,13 +27,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Check if build is needed
-        id: check
-        run: |
-          echo "changed=true" >> "$GITHUB_OUTPUT"
-
       - name: Install Rust
-        if: steps.check.outputs.changed == 'true'
         run: |
           rustup toolchain install nightly \
             --profile minimal \
@@ -43,53 +37,41 @@ jobs:
           rustup default nightly
 
       - name: Cache Cargo
-        if: steps.check.outputs.changed == 'true'
         uses: Swatinem/rust-cache@v2
 
       - name: Check formatting
-        if: steps.check.outputs.changed == 'true'
         run: cargo fmt --all --check
 
       - name: Lint
-        if: steps.check.outputs.changed == 'true'
         run: cargo clippy --locked --target wasm32-wasip2 --all-targets -- -D warnings
 
       - name: Check build
-        if: steps.check.outputs.changed == 'true'
         run: cargo check --locked --target wasm32-wasip2
 
       - name: Build
-        if: steps.check.outputs.changed == 'true'
         run: cargo build --locked --release --target wasm32-wasip2
 
       - name: Prepare artifact
-        if: steps.check.outputs.changed == 'true'
         run: |
           mkdir -p dist
           cp "$PLUGIN_WASM" "dist/$ASSET_NAME"
 
       - name: Create unique tag
-        if: steps.check.outputs.changed == 'true'
         run: |
           TAG="nightly-$(date -u +%Y%m%d-%H%M%S)-${GITHUB_SHA::7}"
-
           echo "TAG=$TAG" >> $GITHUB_ENV
 
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
-          git tag "$TAG"
-          git push origin "$TAG"
-
-      - name: Create release
-        if: steps.check.outputs.changed == 'true'
+      - name: Create release (FIXED NOTES)
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          printf "Commit: %s\nGenerated: %s\n" \
+            "$(git rev-parse HEAD)" \
+            "$(date -u '+%Y-%m-%d %H:%M UTC')" > notes.txt
+
           gh release create "$TAG" \
             "dist/$ASSET_NAME" \
             --title "Nightly Build $TAG" \
-            --notes "Commit: $(git rev-parse HEAD)
-Generated: $(date -u '+%Y-%m-%d %H:%M UTC')" \
+            --notes-file notes.txt \
             --prerelease \
             --latest=false
