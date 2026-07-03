@@ -1,2 +1,7 @@
 /target/
 *.wasm
+
+docs/.data/
+docs/.nuxt/
+docs/.output/
+docs/node_modules/

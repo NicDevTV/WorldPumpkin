@@ -11,6 +11,7 @@ on:
 env:
   CARGO_TERM_COLOR: always
   PLUGIN_WASM: target/wasm32-wasip2/release/world_pumpkin.wasm
+  ASSET_NAME: world_pumpkin.wasm
 
 permissions:
   contents: write
@@ -54,7 +55,7 @@ jobs:
       - name: Create release bundle
         run: |
           mkdir -p dist
-          cp "$PLUGIN_WASM" "dist/world_pumpkin-${{ inputs.tag }}.wasm"
+          cp "$PLUGIN_WASM" "dist/$ASSET_NAME"
 
       - name: Create draft release
         env:
@@ -64,4 +65,4 @@ jobs:
             --draft \
             --title "WorldPumpkin ${{ inputs.tag }}" \
             --notes "Draft release for WorldPumpkin ${{ inputs.tag }}." \
-            "dist/world_pumpkin-${{ inputs.tag }}.wasm"
+            "dist/$ASSET_NAME"
