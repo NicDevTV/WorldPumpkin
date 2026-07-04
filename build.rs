@@ -1,7 +1,7 @@
 // Copyright (c) 2026 NicDevTV
 // SPDX-License-Identifier: MIT
 
-use pumpkin_data::Block;
+use pumpkin_data::{Block, BlockId};
 use std::{
     collections::{BTreeMap, BTreeSet},
     env, fs,
@@ -15,14 +15,17 @@ fn main() {
 
     let mut blocks = BTreeSet::new();
     for raw_id in 0..=4096 {
-        let block = Block::from_id(raw_id);
+        let Some(block_id) = BlockId::new(raw_id) else {
+            continue;
+        };
+        let block = Block::from_id(block_id);
         blocks.insert(block.id);
     }
 
     let mut states = BTreeMap::new();
     for raw_id in blocks {
         let block = Block::from_id(raw_id);
-        insert_state(&mut states, block.name, block.default_state.id);
+        insert_state(&mut states, block.name, block.default_state.id.as_u16());
 
         for state in block.states {
             let Some(properties) = block.properties(state.id) else {
@@ -37,7 +40,11 @@ fn main() {
                 .map(|(name, value)| format!("{name}={value}"))
                 .collect::<Vec<_>>()
                 .join(",");
-            insert_state(&mut states, &format!("{}[{suffix}]", block.name), state.id);
+            insert_state(
+                &mut states,
+                &format!("{}[{suffix}]", block.name),
+                state.id.as_u16(),
+            );
         }
     }
 

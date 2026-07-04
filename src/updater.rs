@@ -15,7 +15,9 @@ use serde_json::Value;
 use std::{
     cmp::Ordering,
     sync::{Arc, Mutex},
+    time::Duration,
 };
+use waki::Client;
 
 const LATEST_RELEASE_URL: &str =
     "https://api.github.com/repos/NicDevTV/WorldPumpkin/releases/latest";
@@ -42,6 +44,14 @@ pub struct UpdateState {
     status: Option<UpdateStatus>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum StartupUpdateStatus {
+    Disabled,
+    UpToDate,
+    Available(UpdateStatus),
+    Failed(String),
+}
+
 impl UpdateState {
     pub fn status(&self) -> Option<UpdateStatus> {
         self.status.clone()
@@ -52,25 +62,24 @@ impl UpdateState {
     }
 }
 
-pub fn check_on_startup(config: &Config, state: &Arc<Mutex<UpdateState>>) {
+pub fn check_on_startup(config: &Config, state: &Arc<Mutex<UpdateState>>) -> StartupUpdateStatus {
     if !config.update_check_enabled {
-        println!("WorldPumpkin update check disabled in config.");
         state.lock().unwrap().replace_status(None);
-        return;
+        return StartupUpdateStatus::Disabled;
     }
 
     match fetch_latest_release() {
         Ok(Some(status)) => {
-            println!("{}", status.message());
-            state.lock().unwrap().replace_status(Some(status));
+            state.lock().unwrap().replace_status(Some(status.clone()));
+            StartupUpdateStatus::Available(status)
         }
         Ok(None) => {
-            println!("WorldPumpkin {PLUGIN_VERSION} is up to date.");
             state.lock().unwrap().replace_status(None);
+            StartupUpdateStatus::UpToDate
         }
         Err(err) => {
-            println!("WorldPumpkin update check failed: {err}");
             state.lock().unwrap().replace_status(None);
+            StartupUpdateStatus::Failed(err)
         }
     }
 }
@@ -106,14 +115,14 @@ fn notify_player(player: &Player, status: &UpdateStatus) {
 }
 
 fn fetch_latest_release() -> Result<Option<UpdateStatus>, String> {
-    let response = ureq::get(LATEST_RELEASE_URL)
+    let response = Client::new()
+        .get(LATEST_RELEASE_URL)
         .header("accept", "application/vnd.github+json")
         .header("user-agent", "WorldPumpkin")
-        .call()
+        .connect_timeout(Duration::from_secs(5))
+        .send()
         .map_err(|err| err.to_string())?;
-    let body = response
-        .into_body()
-        .read_to_string()
+    let body = String::from_utf8(response.body().map_err(|err| err.to_string())?)
         .map_err(|err| err.to_string())?;
     let release: Value = serde_json::from_str(&body).map_err(|err| err.to_string())?;
     let latest_version = release

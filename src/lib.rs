@@ -19,7 +19,7 @@ use pumpkin_plugin_api::{
 };
 use state::PluginState;
 use std::sync::{Arc, Mutex, OnceLock};
-use updater::UpdateState;
+use updater::{StartupUpdateStatus, UpdateState};
 
 pub(crate) const PLUGIN_NAME: &str = "WorldPumpkin";
 pub(crate) const PLUGIN_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -31,6 +31,9 @@ pub(crate) const PUMPKIN_API_GIT: &str = env!("WORLDPUMPKIN_PUMPKIN_API_GIT");
 const ANSI_RESET: &str = "\x1b[0m";
 const ANSI_ORANGE: &str = "\x1b[38;2;255;128;32m";
 const ANSI_GOLD: &str = "\x1b[38;2;255;196;64m";
+const ANSI_GREEN: &str = "\x1b[38;2;96;211;148m";
+const ANSI_RED: &str = "\x1b[38;2;255;92;92m";
+const ANSI_DIM: &str = "\x1b[2m";
 
 const WORLD_BANNER: &[&str] = &[
     r"__        _____  ____  _     ____  ",
@@ -122,21 +125,44 @@ impl Plugin for WorldPumpkin {
             queue.lock().unwrap().process_tick(&server, &config);
         });
 
-        print_startup_banner();
         let config = self.state.lock().unwrap().config().clone();
-        updater::check_on_startup(&config, &self.update_state);
+        let update_status = updater::check_on_startup(&config, &self.update_state);
+        print_startup_banner(&update_status);
         Ok(())
     }
 }
 
-fn print_startup_banner() {
+fn print_startup_banner(update_status: &StartupUpdateStatus) {
     for line in WORLD_BANNER {
         println!("{ANSI_ORANGE}{line}{ANSI_RESET}");
     }
     for line in PUMPKIN_BANNER {
         println!("{ANSI_GOLD}{line}{ANSI_RESET}");
     }
-    println!("{ANSI_GOLD}WorldPumpkin {PLUGIN_VERSION} loaded{ANSI_RESET}");
+
+    match update_status {
+        StartupUpdateStatus::Disabled => {
+            println!(
+                "{ANSI_GOLD}WorldPumpkin {PLUGIN_VERSION} loaded{ANSI_RESET} {ANSI_DIM}- update check disabled{ANSI_RESET}"
+            );
+        }
+        StartupUpdateStatus::UpToDate => {
+            println!(
+                "{ANSI_GOLD}WorldPumpkin {PLUGIN_VERSION} loaded{ANSI_RESET} {ANSI_GREEN}- up to date{ANSI_RESET}"
+            );
+        }
+        StartupUpdateStatus::Available(status) => {
+            println!(
+                "{ANSI_GOLD}WorldPumpkin {PLUGIN_VERSION} loaded{ANSI_RESET} {ANSI_ORANGE}- update {} available: {}{ANSI_RESET}",
+                status.latest_version, status.release_url
+            );
+        }
+        StartupUpdateStatus::Failed(err) => {
+            println!(
+                "{ANSI_GOLD}WorldPumpkin {PLUGIN_VERSION} loaded{ANSI_RESET} {ANSI_RED}- update check failed: {err}{ANSI_RESET}"
+            );
+        }
+    }
 }
 
 fn register_permissions(context: &Context) -> pumpkin_plugin_api::Result<()> {
