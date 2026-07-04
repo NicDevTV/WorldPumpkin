@@ -44,8 +44,6 @@ jobs:
 
       - name: Build static site
         run: npm run build
-        env:
-          NUXT_APP_BASE_URL: /WorldPumpkin/
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v5
