@@ -9,12 +9,13 @@ description = "A small world plugin for Pumpkin Minecraft servers."
 crate-type = ["cdylib"]
 
 [dependencies]
-pumpkin-plugin-api = { version = "0.1.0", git = "https://github.com/Pumpkin-MC/Pumpkin", rev = "e480f322653b69e32b90e735e4703e0b827aa981", package = "pumpkin-plugin-api" }
+pumpkin-plugin-api = { version = "0.1.0", git = "https://github.com/Pumpkin-MC/Pumpkin", rev = "c196aa541190ba2c83f8d1ceea670cf660645147", package = "pumpkin-plugin-api" }
+pumpkin-plugin-utils = { version = "0.1.0", git = "https://github.com/Pumpkin-MC/Pumpkin", rev = "c196aa541190ba2c83f8d1ceea670cf660645147", package = "pumpkin-plugin-utils" }
 serde_json = "1.0"
 waki = "0.5.1"
 
 [build-dependencies]
-pumpkin-data = { git = "https://github.com/Pumpkin-MC/Pumpkin", rev = "e480f322653b69e32b90e735e4703e0b827aa981", package = "pumpkin-data", default-features = false, features = ["block", "tag"] }
+pumpkin-data = { git = "https://github.com/Pumpkin-MC/Pumpkin", rev = "c196aa541190ba2c83f8d1ceea670cf660645147", package = "pumpkin-data", default-features = false, features = ["block", "tag"] }
 
 [profile.release]
 codegen-units = 1

@@ -9,7 +9,7 @@ use crate::{
 use pumpkin_plugin_api::{
     events::{EventData, EventHandler, PlayerJoinEvent},
     player::Player,
-    Server,
+    Context, Server,
 };
 use serde_json::Value;
 use std::{
@@ -25,6 +25,7 @@ const RELEASES_URL: &str = "https://github.com/NicDevTV/WorldPumpkin/releases/la
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct UpdateStatus {
+    pub source: UpdateSource,
     pub latest_version: String,
     pub current_version: String,
     pub release_url: String,
@@ -33,9 +34,24 @@ pub struct UpdateStatus {
 impl UpdateStatus {
     fn message(&self) -> String {
         format!(
-            "Update available: WorldPumpkin {} is loaded, {} is latest. Download: {}",
-            self.current_version, self.latest_version, self.release_url
+            "Update available via {}: WorldPumpkin {} is loaded, {} is latest. Download: {}",
+            self.source, self.current_version, self.latest_version, self.release_url
         )
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum UpdateSource {
+    Marketplace,
+    GitHub,
+}
+
+impl std::fmt::Display for UpdateSource {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Marketplace => formatter.write_str("Marketplace"),
+            Self::GitHub => formatter.write_str("GitHub fallback"),
+        }
     }
 }
 
@@ -47,7 +63,7 @@ pub struct UpdateState {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum StartupUpdateStatus {
     Disabled,
-    UpToDate,
+    UpToDate(UpdateSource),
     Available(UpdateStatus),
     Failed(String),
 }
@@ -62,26 +78,70 @@ impl UpdateState {
     }
 }
 
-pub fn check_on_startup(config: &Config, state: &Arc<Mutex<UpdateState>>) -> StartupUpdateStatus {
+pub fn check_on_startup(
+    config: &Config,
+    state: &Arc<Mutex<UpdateState>>,
+    context: &Context,
+) -> StartupUpdateStatus {
     if !config.update_check_enabled {
         state.lock().unwrap().replace_status(None);
         return StartupUpdateStatus::Disabled;
     }
 
-    match fetch_latest_release() {
+    match check_marketplace(context) {
         Ok(Some(status)) => {
             state.lock().unwrap().replace_status(Some(status.clone()));
             StartupUpdateStatus::Available(status)
         }
         Ok(None) => {
             state.lock().unwrap().replace_status(None);
-            StartupUpdateStatus::UpToDate
+            StartupUpdateStatus::UpToDate(UpdateSource::Marketplace)
         }
-        Err(err) => {
-            state.lock().unwrap().replace_status(None);
-            StartupUpdateStatus::Failed(err)
-        }
+        Err(MarketplaceError::Unavailable(marketplace_error)) => match fetch_latest_release() {
+            Ok(Some(status)) => {
+                state.lock().unwrap().replace_status(Some(status.clone()));
+                StartupUpdateStatus::Available(status)
+            }
+            Ok(None) => {
+                state.lock().unwrap().replace_status(None);
+                StartupUpdateStatus::UpToDate(UpdateSource::GitHub)
+            }
+            Err(github_error) => {
+                state.lock().unwrap().replace_status(None);
+                StartupUpdateStatus::Failed(format!(
+                        "Marketplace unavailable ({marketplace_error}); GitHub fallback failed ({github_error})"
+                    ))
+            }
+        },
     }
+}
+
+enum MarketplaceError {
+    Unavailable(String),
+}
+
+fn check_marketplace(context: &Context) -> Result<Option<UpdateStatus>, MarketplaceError> {
+    let metadata = pumpkin_plugin_utils::init(context)
+        .map_err(|error| MarketplaceError::Unavailable(error.to_string()))?;
+
+    let update = pumpkin_plugin_utils::check_for_updates()
+        .map_err(|error| MarketplaceError::Unavailable(error.to_string()))?;
+    if !update.update_available {
+        return Ok(None);
+    }
+
+    let Some(latest_version) = update.latest_version else {
+        return Err(MarketplaceError::Unavailable(
+            "Marketplace update response did not include latest_version".to_owned(),
+        ));
+    };
+
+    Ok(Some(UpdateStatus {
+        source: UpdateSource::Marketplace,
+        latest_version: normalize_version(&latest_version),
+        current_version: normalize_version(PLUGIN_VERSION),
+        release_url: metadata.marketplace_url.clone(),
+    }))
 }
 
 pub struct UpdateJoinHandler {
@@ -138,6 +198,7 @@ fn fetch_latest_release() -> Result<Option<UpdateStatus>, String> {
     }
 
     Ok(Some(UpdateStatus {
+        source: UpdateSource::GitHub,
         latest_version,
         current_version,
         release_url: release

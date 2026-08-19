@@ -100,6 +100,10 @@ impl Plugin for WorldPumpkin {
         let config = Config::load_or_create(context.get_data_folder())?;
         self.state.lock().unwrap().replace_config(config);
 
+        let config = self.state.lock().unwrap().config().clone();
+        let update_status = updater::check_on_startup(&config, &self.update_state, &context);
+        print_startup_banner(&update_status);
+
         register_permissions(&context)?;
         commands::register(&context, Arc::clone(&self.state), Arc::clone(&self.queue));
         context.register_event_handler::<PlayerCommandSendEvent, _>(
@@ -125,9 +129,6 @@ impl Plugin for WorldPumpkin {
             queue.lock().unwrap().process_tick(&server, &config);
         });
 
-        let config = self.state.lock().unwrap().config().clone();
-        let update_status = updater::check_on_startup(&config, &self.update_state);
-        print_startup_banner(&update_status);
         Ok(())
     }
 }
@@ -146,9 +147,9 @@ fn print_startup_banner(update_status: &StartupUpdateStatus) {
                 "{ANSI_GOLD}WorldPumpkin {PLUGIN_VERSION} loaded{ANSI_RESET} {ANSI_DIM}- update check disabled{ANSI_RESET}"
             );
         }
-        StartupUpdateStatus::UpToDate => {
+        StartupUpdateStatus::UpToDate(source) => {
             println!(
-                "{ANSI_GOLD}WorldPumpkin {PLUGIN_VERSION} loaded{ANSI_RESET} {ANSI_GREEN}- up to date{ANSI_RESET}"
+                "{ANSI_GOLD}WorldPumpkin {PLUGIN_VERSION} loaded{ANSI_RESET} {ANSI_GREEN}- up to date ({source}){ANSI_RESET}"
             );
         }
         StartupUpdateStatus::Available(status) => {
