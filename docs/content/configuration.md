@@ -54,6 +54,7 @@ fallback. Update checks never replace plugin files automatically.
 | `WorldPumpkin:command.set` | OP | Allows `//set`. |
 | `WorldPumpkin:command.replace` | OP | Allows `//replace`. |
 | `WorldPumpkin:command.walls` | OP | Allows `//walls`. |
+| `WorldPumpkin:command.move` | OP | Allows `//move`. |
 | `WorldPumpkin:command.pos` | OP | Allows selection commands. |
 | `WorldPumpkin:command.undo` | OP | Allows `//undo`. |
 | `WorldPumpkin:command.redo` | OP | Allows `//redo`. |

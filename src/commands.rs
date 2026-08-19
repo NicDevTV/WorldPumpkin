@@ -1,6 +1,7 @@
 // Copyright (c) 2026 NicDevTV
 // SPDX-License-Identifier: MIT
 
+mod move_command;
 mod pos;
 mod redo;
 mod replace;
@@ -12,7 +13,8 @@ mod worldpumpkin;
 
 use crate::{
     config::{
-        PERM_LIMIT_BYPASS, PERM_POS, PERM_REDO, PERM_REPLACE, PERM_SET, PERM_UNDO, PERM_WALLS,
+        PERM_LIMIT_BYPASS, PERM_MOVE, PERM_POS, PERM_REDO, PERM_REPLACE, PERM_SET, PERM_UNDO,
+        PERM_WALLS,
     },
     engine::{
         parse_block_pattern, parse_block_state, BlockPattern, BlockPos, EditOperation, EditQueue,
@@ -45,6 +47,7 @@ pub fn register(context: &Context, state: Arc<Mutex<PluginState>>, queue: Arc<Mu
     set::register(context, Arc::clone(&state), Arc::clone(&queue));
     replace::register(context, Arc::clone(&state), Arc::clone(&queue));
     walls::register(context, Arc::clone(&state), Arc::clone(&queue));
+    move_command::register(context, Arc::clone(&state), Arc::clone(&queue));
     undo::register(context, Arc::clone(&state), Arc::clone(&queue));
     redo::register(context, Arc::clone(&state), Arc::clone(&queue));
     worldpumpkin::register(context, state, queue);
@@ -92,6 +95,7 @@ fn is_worldpumpkin_command(command: &str) -> bool {
                 | "set"
                 | "replace"
                 | "walls"
+                | "move"
                 | "undo"
                 | "redo"
         )
@@ -164,6 +168,11 @@ fn handle_double_slash_command(
             ));
             send_player_ok(player, &queued_message(blocks));
             Ok(())
+        }
+        Some("move") => {
+            require_player_permission(player, PERM_MOVE)?;
+            let args = parts.collect::<Vec<_>>().join(" ");
+            move_command::handle_player(player, state, queue, &args)
         }
         Some("undo") => {
             require_player_permission(player, PERM_UNDO)?;

@@ -90,3 +90,17 @@ Redo it:
 ```text
 //redo
 ```
+
+## Move A Selection
+
+Move the selected blocks five blocks north:
+
+```text
+//move 5 north
+```
+
+Without a direction, the selection moves in the direction you are facing:
+
+```text
+//move 2
+```

@@ -34,6 +34,7 @@ Directions are `north`, `south`, `east`, `west`, `up`, and `down`. Short forms a
 | `//set <block>` | Fill the selected cuboid with a block. |
 | `//replace <from> <to>` | Replace matching blocks in the selection. |
 | `//walls <block>` | Build the outer walls of the selection. |
+| `//move <amount> [direction]` | Move the selection contents, defaulting to the direction you are facing. |
 
 Block arguments use Pumpkin block state parsing. Examples: `stone`, `minecraft:stone`, or block states such as `oak_stairs[facing=north]` when supported by the server parser.
 

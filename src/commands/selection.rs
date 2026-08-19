@@ -312,7 +312,7 @@ fn parse_expand_amount(input: &str) -> Result<i32, String> {
     Ok(amount)
 }
 
-fn parse_direction(input: &str) -> Result<Direction, String> {
+pub(super) fn parse_direction(input: &str) -> Result<Direction, String> {
     match input.to_ascii_lowercase().as_str() {
         "n" | "north" => Ok(Direction::North),
         "s" | "south" => Ok(Direction::South),
@@ -324,7 +324,7 @@ fn parse_direction(input: &str) -> Result<Direction, String> {
     }
 }
 
-fn player_direction(player: &Player) -> Direction {
+pub(super) fn player_direction(player: &Player) -> Direction {
     direction_from_rotation(player.get_yaw(), player.get_pitch())
 }
 
@@ -354,7 +354,7 @@ enum ExpandRequest {
 }
 
 #[derive(Clone, Copy)]
-enum Direction {
+pub(super) enum Direction {
     North,
     South,
     East,
@@ -364,6 +364,35 @@ enum Direction {
 }
 
 impl Direction {
+    pub(super) fn offset(self, amount: i32) -> BlockPos {
+        match self {
+            Self::North => BlockPos {
+                z: amount.saturating_neg(),
+                ..BlockPos { x: 0, y: 0, z: 0 }
+            },
+            Self::South => BlockPos {
+                z: amount,
+                ..BlockPos { x: 0, y: 0, z: 0 }
+            },
+            Self::East => BlockPos {
+                x: amount,
+                ..BlockPos { x: 0, y: 0, z: 0 }
+            },
+            Self::West => BlockPos {
+                x: amount.saturating_neg(),
+                ..BlockPos { x: 0, y: 0, z: 0 }
+            },
+            Self::Up => BlockPos {
+                y: amount,
+                ..BlockPos { x: 0, y: 0, z: 0 }
+            },
+            Self::Down => BlockPos {
+                y: amount.saturating_neg(),
+                ..BlockPos { x: 0, y: 0, z: 0 }
+            },
+        }
+    }
+
     fn opposite(self) -> Self {
         match self {
             Self::North => Self::South,
