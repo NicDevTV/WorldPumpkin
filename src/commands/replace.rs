@@ -3,7 +3,7 @@
 
 use super::{
     command_failed, enforce_limit, parse_block_pattern, parse_block_state, queued_message,
-    selection_context, send_ok, string_arg, ARG_FROM, ARG_TO,
+    selection_context, send_ok, string_arg, PatternSuggestionHandler, ARG_FROM, ARG_TO,
 };
 use crate::{
     config::PERM_REPLACE,
@@ -18,22 +18,23 @@ use pumpkin_plugin_api::{
 };
 use std::sync::{Arc, Mutex};
 
+/// Registers the selection replacement command with block-pattern suggestions.
 pub(super) fn register(
     context: &Context,
     state: Arc<Mutex<PluginState>>,
     queue: Arc<Mutex<EditQueue>>,
 ) {
-    let to_arg = CommandNode::argument(ARG_TO, &ArgumentType::String(StringType::Greedy)).execute(
-        ReplaceCommand {
+    let to_arg = CommandNode::argument(ARG_TO, &ArgumentType::String(StringType::Greedy))
+        .suggest(PatternSuggestionHandler)
+        .execute(ReplaceCommand {
             state: Arc::clone(&state),
             queue: Arc::clone(&queue),
-        },
-    );
-    let from_arg = CommandNode::argument(ARG_FROM, &ArgumentType::BlockState);
-    from_arg.then(to_arg);
+        });
+    let from_arg = CommandNode::argument(ARG_FROM, &ArgumentType::BlockState)
+        .suggest(PatternSuggestionHandler)
+        .then(to_arg);
     let names = ["/replace".to_owned()];
-    let command = Command::new(&names, "Replaces blocks in a selection");
-    command.then(from_arg);
+    let command = Command::new(&names, "Replaces blocks in a selection").then(from_arg);
     context.register_command(command, PERM_REPLACE);
 }
 

@@ -9,7 +9,7 @@ use crate::{
 use pumpkin_plugin_api::{
     events::{EventData, EventHandler, PlayerJoinEvent},
     player::Player,
-    Context, Server,
+    Server,
 };
 use serde_json::Value;
 use std::{
@@ -42,15 +42,14 @@ impl UpdateStatus {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum UpdateSource {
-    Marketplace,
     GitHub,
 }
 
 impl std::fmt::Display for UpdateSource {
+    /// Formats the service used to discover a plugin update.
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Marketplace => formatter.write_str("Marketplace"),
-            Self::GitHub => formatter.write_str("GitHub fallback"),
+            Self::GitHub => formatter.write_str("GitHub"),
         }
     }
 }
@@ -78,70 +77,29 @@ impl UpdateState {
     }
 }
 
-pub fn check_on_startup(
-    config: &Config,
-    state: &Arc<Mutex<UpdateState>>,
-    context: &Context,
-) -> StartupUpdateStatus {
+/// Checks GitHub for a newer release and refreshes the shared update state.
+///
+/// Disabled, current, and failed checks clear any previously cached update.
+pub fn check_on_startup(config: &Config, state: &Arc<Mutex<UpdateState>>) -> StartupUpdateStatus {
     if !config.update_check_enabled {
         state.lock().unwrap().replace_status(None);
         return StartupUpdateStatus::Disabled;
     }
 
-    match check_marketplace(context) {
+    match fetch_latest_release() {
         Ok(Some(status)) => {
             state.lock().unwrap().replace_status(Some(status.clone()));
             StartupUpdateStatus::Available(status)
         }
         Ok(None) => {
             state.lock().unwrap().replace_status(None);
-            StartupUpdateStatus::UpToDate(UpdateSource::Marketplace)
+            StartupUpdateStatus::UpToDate(UpdateSource::GitHub)
         }
-        Err(MarketplaceError::Unavailable(marketplace_error)) => match fetch_latest_release() {
-            Ok(Some(status)) => {
-                state.lock().unwrap().replace_status(Some(status.clone()));
-                StartupUpdateStatus::Available(status)
-            }
-            Ok(None) => {
-                state.lock().unwrap().replace_status(None);
-                StartupUpdateStatus::UpToDate(UpdateSource::GitHub)
-            }
-            Err(github_error) => {
-                state.lock().unwrap().replace_status(None);
-                StartupUpdateStatus::Failed(format!(
-                        "Marketplace unavailable ({marketplace_error}); GitHub fallback failed ({github_error})"
-                    ))
-            }
-        },
+        Err(error) => {
+            state.lock().unwrap().replace_status(None);
+            StartupUpdateStatus::Failed(format!("GitHub update check failed ({error})"))
+        }
     }
-}
-
-enum MarketplaceError {
-    Unavailable(String),
-}
-
-fn check_marketplace(context: &Context) -> Result<Option<UpdateStatus>, MarketplaceError> {
-    let metadata = pumpkin_plugin_utils::init(context)
-        .map_err(|error| MarketplaceError::Unavailable(error.to_string()))?;
-
-    let update = pumpkin_plugin_utils::check_for_updates()
-        .map_err(|error| MarketplaceError::Unavailable(error.to_string()))?;
-    if !update.update_available {
-        return Ok(None);
-    }
-
-    let Some(latest_version) = update.latest_version else {
-        return Err(MarketplaceError::Unavailable(
-            "Marketplace update response did not include latest_version".to_owned(),
-        ));
-    };
-
-    Ok(Some(UpdateStatus {
-        source: UpdateSource::Marketplace,
-        latest_version: normalize_version(&latest_version),
-        current_version: normalize_version(PLUGIN_VERSION),
-        release_url: metadata.marketplace_url.clone(),
-    }))
 }
 
 pub struct UpdateJoinHandler {

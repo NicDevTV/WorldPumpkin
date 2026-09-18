@@ -3,7 +3,7 @@
 
 use super::{
     command_failed, enforce_limit, parse_block_pattern, queued_message, selection_context, send_ok,
-    string_arg, ARG_PATTERN,
+    string_arg, PatternSuggestionHandler, ARG_PATTERN,
 };
 use crate::{
     config::PERM_WALLS,
@@ -18,19 +18,20 @@ use pumpkin_plugin_api::{
 };
 use std::sync::{Arc, Mutex};
 
+/// Registers the selection-wall command with block-pattern suggestions.
 pub(super) fn register(
     context: &Context,
     state: Arc<Mutex<PluginState>>,
     queue: Arc<Mutex<EditQueue>>,
 ) {
     let pattern_arg = CommandNode::argument(ARG_PATTERN, &ArgumentType::String(StringType::Greedy))
+        .suggest(PatternSuggestionHandler)
         .execute(WallsCommand {
             state: Arc::clone(&state),
             queue: Arc::clone(&queue),
         });
     let names = ["/walls".to_owned()];
-    let command = Command::new(&names, "Builds WorldPumpkin selection walls");
-    command.then(pattern_arg);
+    let command = Command::new(&names, "Builds WorldPumpkin selection walls").then(pattern_arg);
     context.register_command(command, PERM_WALLS);
 }
 

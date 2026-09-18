@@ -96,13 +96,10 @@ impl Plugin for WorldPumpkin {
         }
     }
 
-    fn on_load(&mut self, context: Context) -> pumpkin_plugin_api::Result<()> {
+    /// Loads configuration, registers plugin integrations, and schedules the update check and edit processing.
+    fn on_load(&self, context: Context) -> pumpkin_plugin_api::Result<()> {
         let config = Config::load_or_create(context.get_data_folder())?;
         self.state.lock().unwrap().replace_config(config);
-
-        let config = self.state.lock().unwrap().config().clone();
-        let update_status = updater::check_on_startup(&config, &self.update_state, &context);
-        print_startup_banner(&update_status);
 
         register_permissions(&context)?;
         commands::register(&context, Arc::clone(&self.state), Arc::clone(&self.queue));
@@ -122,6 +119,12 @@ impl Plugin for WorldPumpkin {
             EventPriority::Normal,
             false,
         )?;
+        let config = self.state.lock().unwrap().config().clone();
+        let update_state = Arc::clone(&self.update_state);
+        context.schedule_delayed_task(1, move |_server| {
+            let update_status = updater::check_on_startup(&config, &update_state);
+            print_startup_banner(&update_status);
+        });
         let state = Arc::clone(&self.state);
         let queue = Arc::clone(&self.queue);
         context.schedule_repeating_task(1, 1, move |server| {
