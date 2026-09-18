@@ -76,10 +76,7 @@ impl UpdateState {
     }
 }
 
-pub fn check_on_startup(
-    config: &Config,
-    state: &Arc<Mutex<UpdateState>>,
-) -> StartupUpdateStatus {
+pub fn check_on_startup(config: &Config, state: &Arc<Mutex<UpdateState>>) -> StartupUpdateStatus {
     if !config.update_check_enabled {
         state.lock().unwrap().replace_status(None);
         return StartupUpdateStatus::Disabled;

@@ -29,8 +29,8 @@ pub(super) fn register(
             state: Arc::clone(&state),
             queue: Arc::clone(&queue),
         });
-    let from_arg =
-        CommandNode::argument(ARG_FROM, &ArgumentType::BlockState).suggest(PatternSuggestionHandler);
+    let from_arg = CommandNode::argument(ARG_FROM, &ArgumentType::BlockState)
+        .suggest(PatternSuggestionHandler);
     from_arg.then(to_arg);
     let names = ["/replace".to_owned()];
     let command = Command::new(&names, "Replaces blocks in a selection");
