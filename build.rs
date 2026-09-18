@@ -53,8 +53,13 @@ fn main() {
          // SPDX-License-Identifier: MIT\n\n\
          pub static BLOCK_STATES: &[(u64, u16)] = &[\n",
     );
-    for (key, (_, state_id)) in states {
+    for (key, (_, state_id)) in &states {
         generated.push_str(&format!("    ({key}, {state_id}),\n"));
+    }
+    generated.push_str("];\n");
+    generated.push_str("\npub static BLOCK_STATE_NAMES: &[&str] = &[\n");
+    for (name, _) in states.values() {
+        generated.push_str(&format!("    {name:?},\n"));
     }
     generated.push_str("];\n");
 

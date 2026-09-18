@@ -101,7 +101,7 @@ impl Plugin for WorldPumpkin {
         self.state.lock().unwrap().replace_config(config);
 
         let config = self.state.lock().unwrap().config().clone();
-        let update_status = updater::check_on_startup(&config, &self.update_state, &context);
+        let update_status = updater::check_on_startup(&config, &self.update_state);
         print_startup_banner(&update_status);
 
         register_permissions(&context)?;

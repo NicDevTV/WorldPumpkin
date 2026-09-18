@@ -3,7 +3,7 @@
 
 use super::{
     command_failed, enforce_limit, parse_block_pattern, queued_message, selection_context, send_ok,
-    string_arg, ARG_PATTERN,
+    string_arg, PatternSuggestionHandler, ARG_PATTERN,
 };
 use crate::{
     config::PERM_WALLS,
@@ -24,6 +24,7 @@ pub(super) fn register(
     queue: Arc<Mutex<EditQueue>>,
 ) {
     let pattern_arg = CommandNode::argument(ARG_PATTERN, &ArgumentType::String(StringType::Greedy))
+        .suggest(PatternSuggestionHandler)
         .execute(WallsCommand {
             state: Arc::clone(&state),
             queue: Arc::clone(&queue),

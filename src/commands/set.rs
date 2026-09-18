@@ -3,7 +3,7 @@
 
 use super::{
     command_failed, enforce_limit, parse_block_pattern, queued_message, selection_context, send_ok,
-    string_arg, ARG_PATTERN,
+    string_arg, PatternSuggestionHandler, ARG_PATTERN,
 };
 use crate::{
     config::PERM_SET,
@@ -23,8 +23,9 @@ pub(super) fn register(
     state: Arc<Mutex<PluginState>>,
     queue: Arc<Mutex<EditQueue>>,
 ) {
-    let pattern_arg =
-        CommandNode::argument(ARG_PATTERN, &ArgumentType::BlockState).execute(SetCommand {
+    let pattern_arg = CommandNode::argument(ARG_PATTERN, &ArgumentType::BlockState)
+        .suggest(PatternSuggestionHandler)
+        .execute(SetCommand {
             state: Arc::clone(&state),
             queue: Arc::clone(&queue),
         });
