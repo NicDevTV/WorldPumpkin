@@ -46,6 +46,7 @@ pub enum UpdateSource {
 }
 
 impl std::fmt::Display for UpdateSource {
+    /// Formats the service used to discover a plugin update.
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::GitHub => formatter.write_str("GitHub"),
@@ -76,6 +77,7 @@ impl UpdateState {
     }
 }
 
+/// Checks GitHub for a newer release and refreshes the shared update state.
 pub fn check_on_startup(config: &Config, state: &Arc<Mutex<UpdateState>>) -> StartupUpdateStatus {
     if !config.update_check_enabled {
         state.lock().unwrap().replace_status(None);

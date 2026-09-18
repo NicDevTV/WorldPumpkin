@@ -21,6 +21,7 @@ use std::sync::{Arc, Mutex};
 
 const ARG_MOVE: &str = "move";
 
+/// Registers the command that moves blocks within the active selection.
 pub(super) fn register(
     context: &Context,
     state: Arc<Mutex<PluginState>>,

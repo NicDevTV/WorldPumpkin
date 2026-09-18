@@ -15,6 +15,7 @@ use pumpkin_plugin_api::{
 };
 use std::sync::{Arc, Mutex};
 
+/// Registers WorldPumpkin's administrative subcommands.
 pub(super) fn register(
     context: &Context,
     state: Arc<Mutex<PluginState>>,

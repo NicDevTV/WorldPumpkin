@@ -40,6 +40,7 @@ const ARG_TO: &str = "to";
 
 pub(crate) use suggestions::PatternSuggestionHandler;
 
+/// Registers every WorldPumpkin command with the Pumpkin plugin context.
 pub fn register(context: &Context, state: Arc<Mutex<PluginState>>, queue: Arc<Mutex<EditQueue>>) {
     pos::register(context, Arc::clone(&state), SelectionSlot::Pos1);
     pos::register(context, Arc::clone(&state), SelectionSlot::Pos2);

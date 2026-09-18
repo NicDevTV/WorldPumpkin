@@ -13,6 +13,7 @@ pub enum MessageKind {
     Error,
 }
 
+/// Builds a complete WorldPumpkin-prefixed message for the requested message kind.
 pub fn prefixed(kind: MessageKind, message: &str) -> TextComponent {
     let root = TextComponent::text("");
     // Pumpkin's Wasm API has RGB components, but no MiniMessage parser.
@@ -21,10 +22,12 @@ pub fn prefixed(kind: MessageKind, message: &str) -> TextComponent {
     append_colored(root, message, body_color(kind), false)
 }
 
+/// Appends the WorldPumpkin brand text and its gradient to a component.
 pub fn append_brand_gradient(root: TextComponent) -> TextComponent {
     append_gradient(root, BRAND)
 }
 
+/// Appends text with colors interpolated across the brand gradient.
 fn append_gradient(mut root: TextComponent, text: &str) -> TextComponent {
     let chars = text.chars().count().saturating_sub(1).max(1);
     for (index, character) in text.chars().enumerate() {
@@ -34,6 +37,7 @@ fn append_gradient(mut root: TextComponent, text: &str) -> TextComponent {
     root
 }
 
+/// Appends a non-italic child component with the specified color and weight.
 fn append_colored(root: TextComponent, text: &str, color: RgbColor, bold: bool) -> TextComponent {
     let child = TextComponent::text(text)
         .color_rgb(color)

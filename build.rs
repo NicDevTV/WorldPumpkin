@@ -8,6 +8,7 @@ use std::{
     path::PathBuf,
 };
 
+/// Generates block-state lookup tables and exports dependency metadata for the plugin build.
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed=Cargo.toml");

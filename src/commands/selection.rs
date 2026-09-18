@@ -25,6 +25,7 @@ pub(super) fn register_chunk(context: &Context, state: Arc<Mutex<PluginState>>) 
     context.register_command(command, PERM_POS);
 }
 
+/// Registers the command that expands the active selection in a chosen direction.
 pub(super) fn register_expand(context: &Context, state: Arc<Mutex<PluginState>>) {
     let names = ["/expand".to_owned()];
     let args = pumpkin_plugin_api::command::CommandNode::argument(

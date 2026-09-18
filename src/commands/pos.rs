@@ -11,6 +11,7 @@ use pumpkin_plugin_api::{
 };
 use std::sync::{Arc, Mutex};
 
+/// Registers a command that stores one endpoint of a player's selection.
 pub(super) fn register(context: &Context, state: Arc<Mutex<PluginState>>, slot: SelectionSlot) {
     let name = match slot {
         SelectionSlot::Pos1 => "pos1",

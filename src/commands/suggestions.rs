@@ -10,6 +10,7 @@ const MAX_SUGGESTIONS: usize = 100;
 pub(crate) struct PatternSuggestionHandler;
 
 impl CommandSuggestionHandler for PatternSuggestionHandler {
+    /// Suggests block-state names matching the current pattern token.
     fn suggest(
         &self,
         _sender: CommandSender,
