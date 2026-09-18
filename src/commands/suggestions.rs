@@ -4,7 +4,6 @@ use pumpkin_plugin_api::{
     commands::CommandSuggestionHandler,
     Server,
 };
-
 const MAX_SUGGESTIONS: usize = 100;
 
 pub(crate) struct PatternSuggestionHandler;
