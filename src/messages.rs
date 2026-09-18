@@ -22,12 +22,12 @@ pub fn prefixed(kind: MessageKind, message: &str) -> TextComponent {
     append_colored(root, message, body_color(kind), false)
 }
 
-/// Appends the WorldPumpkin brand text and its gradient to a component.
+/// Returns `root` with the bold, gradient-colored WorldPumpkin brand appended.
 pub fn append_brand_gradient(root: TextComponent) -> TextComponent {
     append_gradient(root, BRAND)
 }
 
-/// Appends text with colors interpolated across the brand gradient.
+/// Returns `root` with `text` appended in bold using the brand gradient.
 fn append_gradient(mut root: TextComponent, text: &str) -> TextComponent {
     let chars = text.chars().count().saturating_sub(1).max(1);
     for (index, character) in text.chars().enumerate() {
@@ -37,7 +37,7 @@ fn append_gradient(mut root: TextComponent, text: &str) -> TextComponent {
     root
 }
 
-/// Appends a non-italic child component with the specified color and weight.
+/// Returns `root` with a non-italic child using the requested color and bold setting.
 fn append_colored(root: TextComponent, text: &str, color: RgbColor, bold: bool) -> TextComponent {
     let child = TextComponent::text(text)
         .color_rgb(color)

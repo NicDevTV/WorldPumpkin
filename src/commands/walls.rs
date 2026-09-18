@@ -18,7 +18,7 @@ use pumpkin_plugin_api::{
 };
 use std::sync::{Arc, Mutex};
 
-/// Registers the command that fills the walls of the active selection.
+/// Registers the selection-wall command with block-pattern suggestions.
 pub(super) fn register(
     context: &Context,
     state: Arc<Mutex<PluginState>>,

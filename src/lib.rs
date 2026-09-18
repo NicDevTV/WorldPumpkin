@@ -96,7 +96,7 @@ impl Plugin for WorldPumpkin {
         }
     }
 
-    /// Loads configuration, registers plugin integrations, and schedules startup checks.
+    /// Loads configuration, registers plugin integrations, and schedules the update check and edit processing.
     fn on_load(&self, context: Context) -> pumpkin_plugin_api::Result<()> {
         let config = Config::load_or_create(context.get_data_folder())?;
         self.state.lock().unwrap().replace_config(config);

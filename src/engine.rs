@@ -1006,7 +1006,7 @@ pub fn parse_block_state(input: &str) -> Result<u16, String> {
         .map_err(|_| format!("unknown block state `{input}`"))
 }
 
-/// Returns every generated block-state name available to commands and suggestions.
+/// Returns the generated block-state names used for command suggestions.
 pub fn block_state_names() -> &'static [&'static str] {
     generated_blocks::BLOCK_STATE_NAMES
 }

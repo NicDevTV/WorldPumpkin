@@ -78,6 +78,8 @@ impl UpdateState {
 }
 
 /// Checks GitHub for a newer release and refreshes the shared update state.
+///
+/// Disabled, current, and failed checks clear any previously cached update.
 pub fn check_on_startup(config: &Config, state: &Arc<Mutex<UpdateState>>) -> StartupUpdateStatus {
     if !config.update_check_enabled {
         state.lock().unwrap().replace_status(None);

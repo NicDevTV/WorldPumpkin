@@ -9,7 +9,9 @@ const MAX_SUGGESTIONS: usize = 100;
 pub(crate) struct PatternSuggestionHandler;
 
 impl CommandSuggestionHandler for PatternSuggestionHandler {
-    /// Suggests block-state names matching the current pattern token.
+    /// Suggests up to 100 block-state names that match the current pattern token.
+    ///
+    /// The replacement range preserves any preceding weight and `minecraft:` namespace.
     fn suggest(
         &self,
         _sender: CommandSender,
