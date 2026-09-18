@@ -96,7 +96,7 @@ impl Plugin for WorldPumpkin {
         }
     }
 
-    fn on_load(&mut self, context: Context) -> pumpkin_plugin_api::Result<()> {
+    fn on_load(&self, context: Context) -> pumpkin_plugin_api::Result<()> {
         let config = Config::load_or_create(context.get_data_folder())?;
         self.state.lock().unwrap().replace_config(config);
 

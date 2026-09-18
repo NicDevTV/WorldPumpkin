@@ -30,8 +30,7 @@ pub(super) fn register(
             queue: Arc::clone(&queue),
         });
     let names = ["/walls".to_owned()];
-    let command = Command::new(&names, "Builds WorldPumpkin selection walls");
-    command.then(pattern_arg);
+    let command = Command::new(&names, "Builds WorldPumpkin selection walls").then(pattern_arg);
     context.register_command(command, PERM_WALLS);
 }
 

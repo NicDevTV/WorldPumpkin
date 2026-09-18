@@ -33,8 +33,7 @@ pub(super) fn register(
     let args =
         CommandNode::argument(ARG_MOVE, &ArgumentType::String(StringType::Greedy)).execute(handler);
     let names = ["/move".to_owned()];
-    let command = Command::new(&names, "Moves the contents of a WorldPumpkin selection");
-    command.then(args);
+    let command = Command::new(&names, "Moves the contents of a WorldPumpkin selection").then(args);
     context.register_command(command, PERM_MOVE);
 }
 

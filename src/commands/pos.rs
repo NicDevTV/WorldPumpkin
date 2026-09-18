@@ -21,11 +21,10 @@ pub(super) fn register(context: &Context, state: Arc<Mutex<PluginState>>, slot: 
         slot,
     };
     let names = [format!("/{name}")];
-    let command = Command::new(&names, "Sets a WorldPumpkin selection position")
-        .execute(PosCommand { state, slot });
-
     let pos_arg = CommandNode::argument(ARG_POS, &ArgumentType::BlockPos).execute(arg_handler);
-    command.then(pos_arg);
+    let command = Command::new(&names, "Sets a WorldPumpkin selection position")
+        .execute(PosCommand { state, slot })
+        .then(pos_arg);
     context.register_command(command, PERM_POS);
 }
 

@@ -30,8 +30,7 @@ pub(super) fn register(
             queue: Arc::clone(&queue),
         });
     let names = ["/set".to_owned()];
-    let command = Command::new(&names, "Fills a WorldPumpkin selection");
-    command.then(pattern_arg);
+    let command = Command::new(&names, "Fills a WorldPumpkin selection").then(pattern_arg);
     context.register_command(command, PERM_SET);
 }
 

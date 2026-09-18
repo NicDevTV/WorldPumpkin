@@ -27,10 +27,10 @@ pub(super) fn register(
     let status = CommandNode::literal("status").execute(StatusCommand { state, queue });
     let info = CommandNode::literal("info").execute(InfoCommand);
     let names = ["worldpumpkin".to_owned(), "wp".to_owned()];
-    let command = Command::new(&names, "WorldPumpkin administration");
-    command.then(reload);
-    command.then(status);
-    command.then(info);
+    let command = Command::new(&names, "WorldPumpkin administration")
+        .then(reload)
+        .then(status)
+        .then(info);
     context.register_command(command, PERM_STATUS);
 }
 

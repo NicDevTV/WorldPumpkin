@@ -30,11 +30,10 @@ pub(super) fn register(
             queue: Arc::clone(&queue),
         });
     let from_arg = CommandNode::argument(ARG_FROM, &ArgumentType::BlockState)
-        .suggest(PatternSuggestionHandler);
-    from_arg.then(to_arg);
+        .suggest(PatternSuggestionHandler)
+        .then(to_arg);
     let names = ["/replace".to_owned()];
-    let command = Command::new(&names, "Replaces blocks in a selection");
-    command.then(from_arg);
+    let command = Command::new(&names, "Replaces blocks in a selection").then(from_arg);
     context.register_command(command, PERM_REPLACE);
 }
 
