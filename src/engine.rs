@@ -112,6 +112,7 @@ pub struct EditOperation {
 }
 
 impl EditOperation {
+    /// Creates a deferred cuboid fill with a fresh seed for deterministic pattern choices.
     pub fn set(
         owner: String,
         world: World,
@@ -134,6 +135,7 @@ impl EditOperation {
         }
     }
 
+    /// Creates a deferred edit that replaces only states matching `from` with pattern choices.
     pub fn replace(
         owner: String,
         world: World,
@@ -160,6 +162,7 @@ impl EditOperation {
         }
     }
 
+    /// Creates a deferred pattern fill of the cuboid's vertical faces without duplicate positions.
     pub fn walls(
         owner: String,
         world: World,
@@ -214,6 +217,7 @@ impl EditOperation {
         }
     }
 
+    /// Creates a deferred history replay, traversing changes backward for undo and forward for redo.
     pub fn replay(
         owner: String,
         world: World,
@@ -338,6 +342,7 @@ impl EditOperation {
         }
     }
 
+    /// Visits at most `budget` positions, applying the pattern and recording changes up to the history limit.
     fn process_forward(
         &mut self,
         budget: usize,
@@ -610,6 +615,7 @@ impl ProcessResult {
     }
 }
 
+/// Replays at most `budget` history changes, restoring both block states and entity snapshots.
 fn process_replay(
     world: &World,
     history: &mut HistoryEntry,
@@ -656,6 +662,7 @@ fn next_pattern_seed() -> u64 {
     PATTERN_SEED.fetch_add(1, Ordering::Relaxed)
 }
 
+/// Hashes signed block coordinates with an edit seed for deterministic pattern selection.
 pub(super) fn position_hash(pos: BlockPos, seed: u64) -> u64 {
     let mut hash = 0xcbf29ce484222325_u64 ^ seed;
     for value in [pos.x, pos.y, pos.z] {
@@ -731,6 +738,7 @@ mod tests {
         assert_unique(&positions);
     }
 
+    /// Checks that wall counts match generated positions for thin and ordinary cuboids.
     #[test]
     fn wall_counts_match_positions_for_thin_and_normal_selections() {
         for x in 1..=4 {
@@ -743,6 +751,7 @@ mod tests {
         }
     }
 
+    /// Checks that extreme cuboid counts saturate instead of overflowing or allocating walls.
     #[test]
     fn huge_selections_saturate_without_overflow_or_allocating_walls() {
         let cuboid = Cuboid::new(

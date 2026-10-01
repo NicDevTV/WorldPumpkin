@@ -35,6 +35,7 @@ struct PosCommand {
 }
 
 impl CommandHandler for PosCommand {
+    /// Stores the supplied endpoint, falling back to the sender position, and reports the selection.
     fn handle(
         &self,
         sender: CommandSender,
@@ -61,6 +62,9 @@ impl CommandHandler for PosCommand {
     }
 }
 
+/// Parses three integer coordinates with optional `~` offsets, or uses the current position.
+///
+/// Rejects extra or missing coordinates, invalid integers, and relative coordinate overflow.
 pub(super) fn parse_position(args: &str, current: BlockPos) -> Result<BlockPos, String> {
     let parts = args.split_whitespace().collect::<Vec<_>>();
     if parts.is_empty() {
@@ -69,6 +73,7 @@ pub(super) fn parse_position(args: &str, current: BlockPos) -> Result<BlockPos, 
     if parts.len() != 3 {
         return Err("Usage: //pos1 or //pos2 [x y z]".to_owned());
     }
+    /// Parses an absolute coordinate or a checked `~` offset from the current coordinate.
     fn coordinate(input: &str, current: i32) -> Result<i32, String> {
         if let Some(offset) = input.strip_prefix('~') {
             let offset = if offset.is_empty() {
@@ -97,6 +102,7 @@ pub(super) fn parse_position(args: &str, current: BlockPos) -> Result<BlockPos, 
 #[cfg(test)]
 mod tests {
     use super::*;
+    /// Checks absolute and relative positions, the empty-input default, and invalid coordinates.
     #[test]
     fn positions_accept_explicit_and_relative_coordinates() {
         let current = BlockPos {

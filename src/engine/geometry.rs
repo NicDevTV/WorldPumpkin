@@ -11,6 +11,7 @@ pub struct BlockPos {
 }
 
 impl BlockPos {
+    /// Adds an offset to each coordinate, returning `None` if any coordinate overflows.
     pub(super) fn checked_offset(self, offset: Self) -> Option<Self> {
         Some(Self {
             x: self.x.checked_add(offset.x)?,
@@ -21,6 +22,7 @@ impl BlockPos {
 }
 
 impl From<WitBlockPos> for BlockPos {
+    /// Copies Pumpkin's block coordinates into the plugin's position type.
     fn from(pos: WitBlockPos) -> Self {
         Self {
             x: pos.x,
@@ -31,6 +33,7 @@ impl From<WitBlockPos> for BlockPos {
 }
 
 impl From<BlockPos> for WitBlockPos {
+    /// Copies the plugin's block coordinates into Pumpkin's position type.
     fn from(pos: BlockPos) -> Self {
         Self {
             x: pos.x,
@@ -47,6 +50,7 @@ pub struct Selection {
 }
 
 impl Selection {
+    /// Returns the normalized inclusive cuboid, or `None` when either endpoint is unset.
     pub fn cuboid(self) -> Option<Cuboid> {
         Some(Cuboid::new(self.pos1?, self.pos2?))
     }
@@ -59,6 +63,7 @@ pub struct Cuboid {
 }
 
 impl Cuboid {
+    /// Normalizes two corners into an inclusive cuboid with ordered bounds on every axis.
     pub fn new(a: BlockPos, b: BlockPos) -> Self {
         Self {
             min: BlockPos {
@@ -74,11 +79,13 @@ impl Cuboid {
         }
     }
 
+    /// Counts all blocks in the inclusive cuboid, saturating at `u64::MAX` on overflow.
     pub fn volume(self) -> u64 {
         let [x, y, z] = self.dimensions();
         x.saturating_mul(y).saturating_mul(z)
     }
 
+    /// Counts unique blocks on the vertical faces, saturating at `u64::MAX` on overflow.
     pub fn wall_volume(self) -> u64 {
         let [x, y, z] = self.dimensions();
         let perimeter = if x == 1 || z == 1 {
@@ -89,6 +96,7 @@ impl Cuboid {
         perimeter.saturating_mul(y)
     }
 
+    /// Iterates every included position with X advancing fastest, then Z, then Y.
     pub fn iter(self) -> CuboidIter {
         CuboidIter {
             cuboid: self,
@@ -96,6 +104,7 @@ impl Cuboid {
         }
     }
 
+    /// Collects unique positions on the vertical faces, including degenerate one-block widths.
     pub fn wall_positions(self) -> Vec<BlockPos> {
         let mut positions = Vec::new();
         for y in self.min.y..=self.max.y {
@@ -121,6 +130,7 @@ impl Cuboid {
         positions
     }
 
+    /// Returns the inclusive X, Y, and Z lengths using widened coordinate arithmetic.
     fn dimensions(self) -> [u64; 3] {
         [
             (i64::from(self.max.x) - i64::from(self.min.x) + 1) as u64,
@@ -129,6 +139,7 @@ impl Cuboid {
         ]
     }
 
+    /// Offsets both corners, returning `None` if any translated coordinate overflows.
     pub fn translated(self, offset: BlockPos) -> Option<Self> {
         Some(Self {
             min: self.min.checked_offset(offset)?,
@@ -145,6 +156,7 @@ pub struct CuboidIter {
 impl Iterator for CuboidIter {
     type Item = BlockPos;
 
+    /// Yields the next included position in X, Z, Y order, or `None` after the final corner.
     fn next(&mut self) -> Option<Self::Item> {
         let current = self.next?;
         self.next = advance_position(self.cuboid, current);
@@ -152,6 +164,7 @@ impl Iterator for CuboidIter {
     }
 }
 
+/// Advances within the inclusive cuboid in X, Z, Y order without stepping past its bounds.
 fn advance_position(cuboid: Cuboid, current: BlockPos) -> Option<BlockPos> {
     if current.x < cuboid.max.x {
         return Some(BlockPos {

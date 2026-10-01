@@ -24,10 +24,15 @@ pub(super) struct WriteStrategy {
 
 /// The edit/history logic also runs against an in-memory world in regression tests.
 pub(super) trait BlockAccess {
+    /// Reads the current block state at a position.
     fn state(&mut self, pos: BlockPos) -> u16;
+    /// Reports whether the state supports a block entity.
     fn has_entity(&self, state: u16) -> bool;
+    /// Reads serialized block-entity NBT when an entity exists at the position.
     fn entity(&self, pos: BlockPos) -> Option<Vec<u8>>;
+    /// Writes a state, enabling entity lifecycle callbacks when requested.
     fn write_state(&mut self, pos: BlockPos, state: u16, entity_callbacks: bool);
+    /// Restores the supplied entity NBT; `None` leaves cleanup to the state write.
     fn write_entity(&mut self, pos: BlockPos, nbt: Option<&[u8]>);
 }
 
@@ -38,6 +43,7 @@ pub(super) struct WorldAccess<'a> {
 }
 
 impl<'a> WorldAccess<'a> {
+    /// Borrows a world, shared chunk cursor, and write strategy for edit or replay access.
     pub(super) fn new(
         world: &'a World,
         chunk_cursor: &'a mut Option<ChunkCursor>,
@@ -52,11 +58,13 @@ impl<'a> WorldAccess<'a> {
 }
 
 impl BlockAccess for WorldAccess<'_> {
+    /// Reads the state through the configured chunk or world access path.
     fn state(&mut self, pos: BlockPos) -> u16 {
         self.writer
             .get_block_state_id(self.world, self.chunk_cursor, pos)
     }
 
+    /// Checks and caches whether the runtime state has a block-entity type.
     fn has_entity(&self, state: u16) -> bool {
         if let Some(has_entity) = self.writer.entity_states.borrow().get(&state) {
             return *has_entity;
@@ -70,10 +78,12 @@ impl BlockAccess for WorldAccess<'_> {
         has_entity
     }
 
+    /// Reads the current serialized entity NBT from the world.
     fn entity(&self, pos: BlockPos) -> Option<Vec<u8>> {
         self.world.get_block_entity_nbt(pos.into())
     }
 
+    /// Writes a state through entity callbacks when needed, otherwise using the configured fast path.
     fn write_state(&mut self, pos: BlockPos, state: u16, entity_callbacks: bool) {
         if entity_callbacks {
             self.writer
@@ -84,11 +94,16 @@ impl BlockAccess for WorldAccess<'_> {
         }
     }
 
+    /// Restores supplied entity NBT through the writer, leaving `None` to state-write cleanup.
     fn write_entity(&mut self, pos: BlockPos, nbt: Option<&[u8]>) {
         self.writer.set_block_entity(self.world, pos, nbt);
     }
 }
 
+/// Applies a state change unless the replacement filter misses or the state is unchanged.
+///
+/// Returns old and new state/entity snapshots only when history recording is enabled.
+/// A `None` return can therefore still mean a write occurred without history.
 pub(super) fn apply_forward(
     access: &mut impl BlockAccess,
     pos: BlockPos,
@@ -125,6 +140,9 @@ pub(super) fn apply_forward(
     })
 }
 
+/// Restores the state and optional entity snapshot selected by the replay direction.
+///
+/// Enables entity callbacks when either state or saved snapshot requires them.
 pub(super) fn replay_change(
     access: &mut impl BlockAccess,
     change: &BlockChange,
@@ -144,6 +162,7 @@ pub(super) fn replay_change(
 }
 
 impl WriteStrategy {
+    /// Builds a write strategy and empty entity-state cache from the edit configuration.
     pub(super) fn new(config: &Config) -> Self {
         Self {
             entity_states: RefCell::new(HashMap::new()),
@@ -154,6 +173,7 @@ impl WriteStrategy {
         }
     }
 
+    /// Reads via a cached chunk in fast mode, falling back to the world API when unavailable.
     pub(super) fn get_block_state_id(
         &self,
         world: &World,
@@ -166,6 +186,7 @@ impl WriteStrategy {
         )
     }
 
+    /// Writes directly to an available chunk in fast mode, otherwise using configured world flags.
     pub(super) fn set_block_state(
         &self,
         world: &World,
@@ -181,6 +202,7 @@ impl WriteStrategy {
         world.set_block_state(pos.into(), state, self.fallback_flags);
     }
 
+    /// Restores supplied entity NBT and logs host errors; `None` performs no entity write.
     pub(super) fn set_block_entity(&self, world: &World, pos: BlockPos, nbt: Option<&[u8]>) {
         let Some(nbt) = nbt else {
             return;
@@ -190,6 +212,7 @@ impl WriteStrategy {
         }
     }
 
+    /// Writes through the world API with entity lifecycle flags that suppress replacement drops.
     pub(super) fn set_block_state_with_entity_callbacks(
         &self,
         world: &World,
@@ -199,6 +222,9 @@ impl WriteStrategy {
         world.set_block_state(pos.into(), state, self.entity_callback_flags);
     }
 
+    /// Returns the chunk for this position in fast mode, refreshing the cursor as needed.
+    ///
+    /// Returns `None` outside fast mode or when the world cannot provide the chunk.
     fn chunk<'a>(
         &self,
         world: &World,
@@ -226,6 +252,7 @@ impl WriteStrategy {
     }
 }
 
+/// Converts X and Z to chunk-local coordinates, wrapping negatives and preserving world Y.
 fn local_chunk_pos(pos: BlockPos) -> WitBlockPos {
     WitBlockPos {
         x: pos.x.rem_euclid(16),
@@ -234,6 +261,7 @@ fn local_chunk_pos(pos: BlockPos) -> WitBlockPos {
     }
 }
 
+/// Builds ordinary write flags from client-notification and fast-mode settings.
 fn block_flags(config: &Config) -> BlockFlags {
     let mut flags = BlockFlags::empty();
 
@@ -255,6 +283,7 @@ fn block_flags(config: &Config) -> BlockFlags {
     flags
 }
 
+/// Builds entity write flags that allow creation while suppressing inventory-dropping replacement callbacks.
 fn block_entity_flags(config: &Config) -> BlockFlags {
     // Container replacement callbacks drop inventory items, which undo would duplicate.
     let mut flags = BlockFlags::FORCE_STATE | BlockFlags::SKIP_BLOCK_ENTITY_REPLACED_CALLBACK;
@@ -289,6 +318,7 @@ mod tests {
     }
 
     impl WorldStub {
+        /// Creates a single-block test world with initial NBT and empty access counters.
         fn new(state: u16, block_entity: Option<Vec<u8>>) -> Self {
             Self {
                 block: BlockSnapshot {
@@ -302,16 +332,20 @@ mod tests {
     }
 
     impl BlockAccess for WorldStub {
+        /// Reads the single state stored by the test world.
         fn state(&mut self, _: BlockPos) -> u16 {
             self.block.state
         }
+        /// Treats only the chest and furnace fixture states as entity-bearing blocks.
         fn has_entity(&self, state: u16) -> bool {
             matches!(state, CHEST | FURNACE)
         }
+        /// Counts the entity read and clones the stored test NBT.
         fn entity(&self, _: BlockPos) -> Option<Vec<u8>> {
             self.entity_reads.set(self.entity_reads.get() + 1);
             self.block.block_entity.clone()
         }
+        /// Records callback usage and simulates entity creation or removal when the state changes.
         fn write_state(&mut self, _: BlockPos, state: u16, callbacks: bool) {
             self.callback_writes.push(callbacks);
             if callbacks && self.block.state != state {
@@ -323,6 +357,7 @@ mod tests {
             }
             self.block.state = state;
         }
+        /// Replaces the test entity snapshot when NBT is supplied, leaving `None` untouched.
         fn write_entity(&mut self, _: BlockPos, nbt: Option<&[u8]>) {
             if let Some(nbt) = nbt {
                 self.block.block_entity = Some(nbt.to_vec());
@@ -330,6 +365,7 @@ mod tests {
         }
     }
 
+    /// Checks that undo restores chest inventory and redo removes it using entity callbacks.
     #[test]
     fn set_undo_restores_inventory_and_redo_removes_it() {
         let inventory = vec![1, 7, 42];
@@ -350,6 +386,7 @@ mod tests {
         assert!(world.callback_writes.iter().all(|callbacks| *callbacks));
     }
 
+    /// Checks that replacing one entity block with another records and replays both NBT snapshots.
     #[test]
     fn replace_keeps_both_entity_snapshots() {
         let mut world = WorldStub::new(CHEST, Some(vec![1, 7]));
@@ -368,6 +405,7 @@ mod tests {
         );
     }
 
+    /// Checks that placing an entity captures its new NBT for redo after undo removes it.
     #[test]
     fn placing_an_entity_records_the_new_nbt_for_redo() {
         let mut world = WorldStub::new(STONE, None);
@@ -379,6 +417,7 @@ mod tests {
         assert_eq!(world.block.block_entity, Some(vec![0]));
     }
 
+    /// Checks that unchanged states and replacement-filter misses preserve inventory without writes.
     #[test]
     fn unchanged_blocks_and_replace_misses_keep_inventory() {
         let mut world = WorldStub::new(CHEST, Some(vec![42]));
@@ -388,6 +427,7 @@ mod tests {
         assert!(world.callback_writes.is_empty());
     }
 
+    /// Checks that disabling history recording still applies the requested block edit.
     #[test]
     fn edits_still_run_when_history_is_full() {
         let mut world = WorldStub::new(CHEST, Some(vec![42]));
@@ -401,6 +441,7 @@ mod tests {
         );
     }
 
+    /// Checks that ordinary states use direct writes without reading entity NBT.
     #[test]
     fn ordinary_blocks_keep_the_direct_write_path() {
         let mut world = WorldStub::new(STONE, None);
@@ -409,6 +450,7 @@ mod tests {
         assert_eq!(world.entity_reads.get(), 0);
     }
 
+    /// Checks that both write modes suppress inventory drops while permitting entity creation callbacks.
     #[test]
     fn entity_writes_do_not_drop_inventory_in_either_mode() {
         for fast_mode in [true, false] {
@@ -424,6 +466,7 @@ mod tests {
         }
     }
 
+    /// Checks that negative world coordinates wrap into the correct local chunk coordinates.
     #[test]
     fn chunk_positions_wrap_negative_coordinates() {
         let pos = local_chunk_pos(BlockPos {

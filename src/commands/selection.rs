@@ -58,6 +58,7 @@ pub(super) fn register_hpos(
     context.register_command(command, PERM_POS);
 }
 
+/// Selects the player's current chunk from the world minimum Y to its highest top block.
 pub(super) fn handle_player_chunk(
     player: &Player,
     state: &Arc<Mutex<PluginState>>,
@@ -110,6 +111,7 @@ struct ChunkCommand {
 }
 
 impl CommandHandler for ChunkCommand {
+    /// Selects the sender's current chunk in its world, rejecting non-player senders.
     fn handle(
         &self,
         sender: CommandSender,
@@ -182,6 +184,7 @@ struct HposCommand {
 }
 
 impl CommandHandler for HposCommand {
+    /// Sets an endpoint to the player's targeted block in the current world and reports it.
     fn handle(
         &self,
         sender: CommandSender,
@@ -204,6 +207,7 @@ impl CommandHandler for HposCommand {
     }
 }
 
+/// Stores both endpoints in one world under a single state lock, then sends the summary.
 fn set_player_selection(
     owner: String,
     world_id: String,
@@ -227,6 +231,9 @@ fn target_block(player: &Player) -> Result<BlockPos, String> {
     Ok(BlockPos::from(result.pos))
 }
 
+/// Expands a complete selection in the given world and saves both updated endpoints.
+///
+/// Vertical expansion requires a world to supply its height limits.
 fn expand_selection(
     owner: String,
     state: &Arc<Mutex<PluginState>>,

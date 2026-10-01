@@ -113,6 +113,7 @@ fn is_worldpumpkin_command(command: &str) -> bool {
     )
 }
 
+/// Dispatches double-slash commands after checking their permissions and arguments.
 fn handle_double_slash_command(
     player: &Player,
     command: &str,
@@ -239,6 +240,7 @@ fn queue_player_edit(
     Ok(())
 }
 
+/// Checks selection permission and sets an endpoint from absolute or relative coordinates.
 pub(super) fn handle_player_pos(
     player: &Player,
     state: &Arc<Mutex<PluginState>>,
@@ -257,6 +259,7 @@ pub(super) fn handle_player_pos(
     Ok(())
 }
 
+/// Stores an endpoint in the player's current world and sends the updated selection summary.
 pub(super) fn set_player_pos(
     player: &Player,
     state: &Arc<Mutex<PluginState>>,
@@ -272,6 +275,8 @@ pub(super) fn set_player_pos(
     send_player_ok(player, &selection_message(selection));
 }
 
+/// Returns the player's owner ID, world, and complete selection cuboid, rejecting missing endpoints
+/// or a selection belonging to another world.
 pub(super) fn player_selection_context(
     player: &Player,
     state: &Arc<Mutex<PluginState>>,
@@ -338,6 +343,9 @@ pub(super) fn send_player_error(player: &Player, message: &str) {
     player.send_system_message(messages::prefixed(MessageKind::Error, message), false);
 }
 
+/// Returns the sender's owner ID, world, and complete selection cuboid.
+///
+/// Fails if the sender has no world or no complete selection in that world.
 pub(super) fn selection_context(
     sender: &CommandSender,
     state: &Arc<Mutex<PluginState>>,

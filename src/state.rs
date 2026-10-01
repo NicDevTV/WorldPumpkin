@@ -29,6 +29,7 @@ impl PluginState {
         self.prune_all_history();
     }
 
+    /// Stores an endpoint for the owner, resetting the previous selection when the world changes.
     pub fn set_position(
         &mut self,
         owner: String,
@@ -48,6 +49,7 @@ impl PluginState {
         session.selection
     }
 
+    /// Returns the owner's selection only when it belongs to the requested world.
     pub fn selection(&self, owner: &str, world_id: &str) -> Option<Selection> {
         self.sessions
             .get(owner)
@@ -200,6 +202,7 @@ fn prune_history(
 #[cfg(test)]
 mod tests {
     use super::*;
+    /// Checks that changing worlds clears old endpoints and hides selections from other worlds.
     #[test]
     fn selections_cannot_cross_worlds() {
         let mut state = PluginState::new(Config::default());

@@ -16,6 +16,7 @@ use pumpkin_plugin_api::{
 };
 use std::sync::{Arc, Mutex};
 
+/// Registers the undo or redo command with its corresponding permission and shared queue.
 pub(super) fn register(
     context: &Context,
     state: Arc<Mutex<PluginState>>,
@@ -36,6 +37,7 @@ pub(super) fn register(
     );
 }
 
+/// Queues the player's latest undo or redo entry and reports the admitted block count.
 pub(super) fn handle_player(
     player: &Player,
     state: &Arc<Mutex<PluginState>>,
@@ -60,6 +62,7 @@ struct HistoryCommand {
 }
 
 impl CommandHandler for HistoryCommand {
+    /// Queues the sender's requested history replay, requiring a world, and reports success.
     fn handle(
         &self,
         sender: CommandSender,
@@ -82,6 +85,10 @@ impl CommandHandler for HistoryCommand {
     }
 }
 
+/// Validates world and queue limits before removing and queuing the latest history entry.
+///
+/// Locks the queue before state so admission and history removal are atomic.
+/// Returns the queued block count, or an error without consuming history.
 fn enqueue(
     owner: String,
     world: World,
@@ -123,6 +130,7 @@ fn enqueue(
     Ok(blocks)
 }
 
+/// Formats the queue confirmation for the selected replay direction.
 fn message(direction: ReplayDirection, blocks: u64) -> String {
     match direction {
         ReplayDirection::Undo => queued_undo_message(blocks),
