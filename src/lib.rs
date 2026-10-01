@@ -9,6 +9,10 @@ mod messages;
 mod state;
 mod updater;
 
+#[cfg(test)]
+#[path = "../build/version.rs"]
+mod build_version;
+
 use config::{Config, PERMISSION_NODES};
 use engine::EditQueue;
 use pumpkin_plugin_api::{
@@ -23,7 +27,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use updater::{StartupUpdateStatus, UpdateState};
 
 pub(crate) const PLUGIN_NAME: &str = "WorldPumpkin";
-pub(crate) const PLUGIN_VERSION: &str = env!("CARGO_PKG_VERSION");
+pub(crate) const PLUGIN_VERSION: &str = env!("WORLDPUMPKIN_VERSION");
 pub(crate) const PLUGIN_AUTHORS: &[&str] = &["NicDevTV"];
 pub(crate) const PLUGIN_DESCRIPTION: &str = "Fast world editing tools for Pumpkin servers.";
 pub(crate) const PUMPKIN_API_VERSION: &str = env!("WORLDPUMPKIN_PUMPKIN_API_VERSION");

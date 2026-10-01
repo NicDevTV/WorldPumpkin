@@ -36,6 +36,12 @@ jobs:
       - name: Test
         run: cargo test --locked --lib
 
+      - name: Check release version tooling
+        run: |
+          cargo fmt --manifest-path tools/release-version/Cargo.toml -- --check
+          cargo test --locked --manifest-path tools/release-version/Cargo.toml --target-dir target
+          cargo clippy --locked --manifest-path tools/release-version/Cargo.toml --target-dir target -- -D warnings
+
       - name: Lint
         run: cargo clippy --locked --target wasm32-wasip2 --all-targets -- -D warnings
 

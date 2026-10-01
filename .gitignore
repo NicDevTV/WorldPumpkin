@@ -1,4 +1,5 @@
 /target/
+/tools/release-version/target/
 *.wasm
 .DS_Store
 

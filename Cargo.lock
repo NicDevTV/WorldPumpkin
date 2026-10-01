@@ -779,9 +779,10 @@ dependencies = [
 
 [[package]]
 name = "world-pumpkin"
-version = "0.0.2"
+version = "0.1.0-dev.0"
 dependencies = [
  "pumpkin-plugin-api",
+ "semver",
  "serde_json",
  "waki",
 ]

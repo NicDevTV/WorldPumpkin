@@ -11,6 +11,7 @@ use pumpkin_plugin_api::{
     player::Player,
     Server,
 };
+use semver::Version;
 use serde_json::Value;
 use std::{
     cmp::Ordering,
@@ -151,7 +152,7 @@ fn fetch_latest_release() -> Result<Option<UpdateStatus>, String> {
         .ok_or_else(|| "GitHub latest release response did not include tag_name".to_owned())?;
 
     let current_version = normalize_version(PLUGIN_VERSION);
-    if compare_versions(&latest_version, &current_version) != Ordering::Greater {
+    if compare_versions(&latest_version, &current_version)? != Ordering::Greater {
         return Ok(None);
     }
 
@@ -171,29 +172,11 @@ fn normalize_version(version: &str) -> String {
     version.trim().trim_start_matches('v').to_owned()
 }
 
-fn compare_versions(left: &str, right: &str) -> Ordering {
-    let left_parts = version_parts(left);
-    let right_parts = version_parts(right);
-    let max_len = left_parts.len().max(right_parts.len());
-
-    for index in 0..max_len {
-        let left = left_parts.get(index).copied().unwrap_or(0);
-        let right = right_parts.get(index).copied().unwrap_or(0);
-        match left.cmp(&right) {
-            Ordering::Equal => {}
-            ordering => return ordering,
-        }
-    }
-
-    Ordering::Equal
-}
-
-fn version_parts(version: &str) -> Vec<u64> {
-    version
-        .split(|character: char| !character.is_ascii_digit())
-        .filter(|part| !part.is_empty())
-        .filter_map(|part| part.parse().ok())
-        .collect()
+fn compare_versions(left: &str, right: &str) -> Result<Ordering, String> {
+    let left = Version::parse(left).map_err(|error| format!("invalid release version: {error}"))?;
+    let right =
+        Version::parse(right).map_err(|error| format!("invalid plugin version: {error}"))?;
+    Ok(left.cmp_precedence(&right))
 }
 
 #[cfg(test)]
@@ -208,8 +191,31 @@ mod tests {
 
     #[test]
     fn compares_versions_by_number_parts() {
-        assert_eq!(compare_versions("1.10.0", "1.2.0"), Ordering::Greater);
-        assert_eq!(compare_versions("1.0.0", "1.0"), Ordering::Equal);
-        assert_eq!(compare_versions("1.0.0", "1.0.1"), Ordering::Less);
+        assert_eq!(
+            compare_versions("1.10.0", "1.2.0").unwrap(),
+            Ordering::Greater
+        );
+        assert_eq!(
+            compare_versions("1.0.0+build.2", "1.0.0+build.1").unwrap(),
+            Ordering::Equal
+        );
+        assert_eq!(compare_versions("1.0.0", "1.0.1").unwrap(), Ordering::Less);
+    }
+
+    #[test]
+    fn stable_releases_are_newer_than_development_builds_of_the_same_version() {
+        assert_eq!(
+            compare_versions("0.1.0", "0.1.0-dev.gabc1234").unwrap(),
+            Ordering::Greater
+        );
+        assert_eq!(
+            compare_versions("0.1.0", "0.2.0-dev.gabc1234").unwrap(),
+            Ordering::Less
+        );
+        assert_eq!(
+            compare_versions("0.2.0-rc.10", "0.2.0-rc.2").unwrap(),
+            Ordering::Greater
+        );
+        assert!(compare_versions("invalid", "0.1.0").is_err());
     }
 }

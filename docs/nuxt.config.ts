@@ -3,7 +3,8 @@ import { resolve } from 'node:path'
 
 const cargoToml = readFileSync(resolve('..', 'Cargo.toml'), 'utf8')
 const pluginVersion =
-  cargoToml.match(/^version\s*=\s*"([^"]+)"/m)?.[1] || '0.0.0'
+  (cargoToml.match(/^version\s*=\s*"([^"]+)"/m)?.[1] || '0.0.0')
+    .replace(/-dev(?:\..*)?$/, '')
 const artifactName = 'world_pumpkin.wasm'
 
 export default defineNuxtConfig({

@@ -1,0 +1,10 @@
+[package]
+name = "world-pumpkin-release-version"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.96"
+publish = false
+
+[dependencies]
+semver = "1.0.28"
+toml_edit = "0.25.15"
