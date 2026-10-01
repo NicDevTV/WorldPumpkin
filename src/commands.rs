@@ -1,26 +1,23 @@
 // Copyright (c) 2026 NicDevTV
 // SPDX-License-Identifier: MIT
 
+mod history;
 mod move_command;
 mod pos;
-mod redo;
 mod replace;
 mod selection;
 mod set;
 mod suggestions;
-mod undo;
 mod walls;
 mod worldpumpkin;
 
 use crate::{
+    blocks::{parse_block_pattern, parse_block_state, BlockPattern},
     config::{
         PERM_LIMIT_BYPASS, PERM_MOVE, PERM_POS, PERM_REDO, PERM_REPLACE, PERM_SET, PERM_UNDO,
         PERM_WALLS,
     },
-    engine::{
-        parse_block_pattern, parse_block_state, BlockPattern, BlockPos, EditOperation, EditQueue,
-        Selection,
-    },
+    engine::{BlockPos, EditOperation, EditQueue, ReplayDirection, Selection},
     messages::{self, MessageKind},
     state::{PluginState, SelectionSlot},
 };
@@ -52,8 +49,18 @@ pub fn register(context: &Context, state: Arc<Mutex<PluginState>>, queue: Arc<Mu
     replace::register(context, Arc::clone(&state), Arc::clone(&queue));
     walls::register(context, Arc::clone(&state), Arc::clone(&queue));
     move_command::register(context, Arc::clone(&state), Arc::clone(&queue));
-    undo::register(context, Arc::clone(&state), Arc::clone(&queue));
-    redo::register(context, Arc::clone(&state), Arc::clone(&queue));
+    history::register(
+        context,
+        Arc::clone(&state),
+        Arc::clone(&queue),
+        ReplayDirection::Undo,
+    );
+    history::register(
+        context,
+        Arc::clone(&state),
+        Arc::clone(&queue),
+        ReplayDirection::Redo,
+    );
     worldpumpkin::register(context, state, queue);
 }
 
@@ -106,6 +113,7 @@ fn is_worldpumpkin_command(command: &str) -> bool {
     )
 }
 
+/// Dispatches double-slash commands after checking their permissions and arguments.
 fn handle_double_slash_command(
     player: &Player,
     command: &str,
@@ -114,8 +122,18 @@ fn handle_double_slash_command(
 ) -> Result<(), String> {
     let mut parts = command.trim_start_matches('/').split_whitespace();
     match parts.next() {
-        Some("pos1") => handle_player_pos(player, state, SelectionSlot::Pos1),
-        Some("pos2") => handle_player_pos(player, state, SelectionSlot::Pos2),
+        Some("pos1") => handle_player_pos(
+            player,
+            state,
+            SelectionSlot::Pos1,
+            &parts.collect::<Vec<_>>().join(" "),
+        ),
+        Some("pos2") => handle_player_pos(
+            player,
+            state,
+            SelectionSlot::Pos2,
+            &parts.collect::<Vec<_>>().join(" "),
+        ),
         Some("hpos1") => {
             require_player_permission(player, PERM_POS)?;
             ensure_no_extra_args(parts)?;
@@ -180,11 +198,13 @@ fn handle_double_slash_command(
         }
         Some("undo") => {
             require_player_permission(player, PERM_UNDO)?;
-            undo::handle_player(player, state, queue)
+            ensure_no_extra_args(parts)?;
+            history::handle_player(player, state, queue, ReplayDirection::Undo)
         }
         Some("redo") => {
             require_player_permission(player, PERM_REDO)?;
-            redo::handle_player(player, state, queue)
+            ensure_no_extra_args(parts)?;
+            history::handle_player(player, state, queue, ReplayDirection::Redo)
         }
         _ => Ok(()),
     }
@@ -220,10 +240,12 @@ fn queue_player_edit(
     Ok(())
 }
 
+/// Checks selection permission and sets an endpoint from absolute or relative coordinates.
 pub(super) fn handle_player_pos(
     player: &Player,
     state: &Arc<Mutex<PluginState>>,
     slot: SelectionSlot,
+    args: &str,
 ) -> Result<(), String> {
     require_player_permission(player, PERM_POS)?;
     let (x, y, z) = player.get_position();
@@ -232,23 +254,29 @@ pub(super) fn handle_player_pos(
         y: y.floor() as i32,
         z: z.floor() as i32,
     };
+    let pos = pos::parse_position(args, pos)?;
     set_player_pos(player, state, slot, pos);
     Ok(())
 }
 
+/// Stores an endpoint in the player's current world and sends the updated selection summary.
 pub(super) fn set_player_pos(
     player: &Player,
     state: &Arc<Mutex<PluginState>>,
     slot: SelectionSlot,
     pos: BlockPos,
 ) {
+    let owner = player.get_name();
+    let world_id = player.get_world().get_id();
     let selection = state
         .lock()
         .unwrap()
-        .set_position(player.get_name(), slot, pos);
+        .set_position(owner, world_id, slot, pos);
     send_player_ok(player, &selection_message(selection));
 }
 
+/// Returns the player's owner ID, world, and complete selection cuboid, rejecting missing endpoints
+/// or a selection belonging to another world.
 pub(super) fn player_selection_context(
     player: &Player,
     state: &Arc<Mutex<PluginState>>,
@@ -261,15 +289,17 @@ pub(super) fn player_selection_context(
     String,
 > {
     let owner = player.get_name();
+    let world = player.get_world();
+    let world_id = world.get_id();
     let selection = state
         .lock()
         .unwrap()
-        .selection(&owner)
+        .selection(&owner, &world_id)
         .ok_or_else(|| "Select two positions first.".to_owned())?;
     let cuboid = selection
         .cuboid()
         .ok_or_else(|| "Select two positions first.".to_owned())?;
-    Ok((owner, player.get_world(), cuboid))
+    Ok((owner, world, cuboid))
 }
 
 pub(super) fn enforce_player_limit(
@@ -313,6 +343,9 @@ pub(super) fn send_player_error(player: &Player, message: &str) {
     player.send_system_message(messages::prefixed(MessageKind::Error, message), false);
 }
 
+/// Returns the sender's owner ID, world, and complete selection cuboid.
+///
+/// Fails if the sender has no world or no complete selection in that world.
 pub(super) fn selection_context(
     sender: &CommandSender,
     state: &Arc<Mutex<PluginState>>,
@@ -325,17 +358,18 @@ pub(super) fn selection_context(
     CommandError,
 > {
     let owner = owner_id(sender);
+    let world = sender
+        .world()
+        .ok_or_else(|| command_failed("Only players in a world can edit blocks."))?;
+    let world_id = world.get_id();
     let selection = state
         .lock()
         .unwrap()
-        .selection(&owner)
+        .selection(&owner, &world_id)
         .ok_or_else(|| command_failed("Select two positions first."))?;
     let cuboid = selection
         .cuboid()
         .ok_or_else(|| command_failed("Select two positions first."))?;
-    let world = sender
-        .world()
-        .ok_or_else(|| command_failed("Only players in a world can edit blocks."))?;
     Ok((owner, world, cuboid))
 }
 

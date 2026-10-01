@@ -1,12 +1,8 @@
 // Copyright (c) 2026 NicDevTV
 // SPDX-License-Identifier: MIT
 
-use crate::{config::Config, state::PluginState};
-use pumpkin_plugin_api::{
-    common::BlockPos as WitBlockPos,
-    server::Server,
-    world::{BlockFlags, Chunk, World},
-};
+use crate::{blocks::BlockPattern, config::Config, state::PluginState};
+use pumpkin_plugin_api::{server::Server, world::World};
 use std::{
     collections::{HashMap, HashSet, VecDeque},
     sync::{
@@ -15,159 +11,15 @@ use std::{
     },
 };
 
-mod generated_blocks {
-    include!(concat!(env!("OUT_DIR"), "/block_states.rs"));
-}
+mod geometry;
+mod writer;
+
+use geometry::CuboidIter;
+pub use geometry::{BlockPos, Cuboid, Selection};
+use writer::{apply_forward, replay_change, ChunkCursor, WorldAccess, WriteStrategy};
 
 // Patterns are deterministic inside one edit, but each queued edit gets a fresh distribution.
 static PATTERN_SEED: AtomicU64 = AtomicU64::new(1);
-
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub struct BlockPos {
-    pub x: i32,
-    pub y: i32,
-    pub z: i32,
-}
-
-impl BlockPos {
-    fn checked_offset(self, offset: Self) -> Option<Self> {
-        Some(Self {
-            x: self.x.checked_add(offset.x)?,
-            y: self.y.checked_add(offset.y)?,
-            z: self.z.checked_add(offset.z)?,
-        })
-    }
-}
-
-impl From<WitBlockPos> for BlockPos {
-    fn from(pos: WitBlockPos) -> Self {
-        Self {
-            x: pos.x,
-            y: pos.y,
-            z: pos.z,
-        }
-    }
-}
-
-impl From<BlockPos> for WitBlockPos {
-    fn from(pos: BlockPos) -> Self {
-        Self {
-            x: pos.x,
-            y: pos.y,
-            z: pos.z,
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub struct Selection {
-    pub pos1: Option<BlockPos>,
-    pub pos2: Option<BlockPos>,
-}
-
-impl Selection {
-    pub fn cuboid(self) -> Option<Cuboid> {
-        Some(Cuboid::new(self.pos1?, self.pos2?))
-    }
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct Cuboid {
-    min: BlockPos,
-    max: BlockPos,
-}
-
-impl Cuboid {
-    pub fn new(a: BlockPos, b: BlockPos) -> Self {
-        Self {
-            min: BlockPos {
-                x: a.x.min(b.x),
-                y: a.y.min(b.y),
-                z: a.z.min(b.z),
-            },
-            max: BlockPos {
-                x: a.x.max(b.x),
-                y: a.y.max(b.y),
-                z: a.z.max(b.z),
-            },
-        }
-    }
-
-    pub fn volume(self) -> u64 {
-        let x = (self.max.x - self.min.x + 1) as u64;
-        let y = (self.max.y - self.min.y + 1) as u64;
-        let z = (self.max.z - self.min.z + 1) as u64;
-        x * y * z
-    }
-
-    pub fn wall_volume(self) -> u64 {
-        self.wall_positions().len() as u64
-    }
-
-    pub fn iter(self) -> CuboidIter {
-        CuboidIter {
-            cuboid: self,
-            next: Some(self.min),
-        }
-    }
-
-    pub fn wall_positions(self) -> Vec<BlockPos> {
-        self.iter()
-            .filter(|pos| {
-                pos.x == self.min.x
-                    || pos.x == self.max.x
-                    || pos.z == self.min.z
-                    || pos.z == self.max.z
-            })
-            .collect()
-    }
-
-    pub fn translated(self, offset: BlockPos) -> Option<Self> {
-        Some(Self {
-            min: self.min.checked_offset(offset)?,
-            max: self.max.checked_offset(offset)?,
-        })
-    }
-}
-
-pub struct CuboidIter {
-    cuboid: Cuboid,
-    next: Option<BlockPos>,
-}
-
-impl Iterator for CuboidIter {
-    type Item = BlockPos;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        let current = self.next?;
-        self.next = advance_position(self.cuboid, current);
-        Some(current)
-    }
-}
-
-fn advance_position(cuboid: Cuboid, current: BlockPos) -> Option<BlockPos> {
-    if current.x < cuboid.max.x {
-        return Some(BlockPos {
-            x: current.x + 1,
-            ..current
-        });
-    }
-    if current.z < cuboid.max.z {
-        return Some(BlockPos {
-            x: cuboid.min.x,
-            z: current.z + 1,
-            ..current
-        });
-    }
-    if current.y < cuboid.max.y {
-        return Some(BlockPos {
-            x: cuboid.min.x,
-            y: current.y + 1,
-            z: cuboid.min.z,
-        });
-    }
-    None
-}
 
 #[derive(Clone, Debug)]
 pub struct HistoryEntry {
@@ -224,42 +76,13 @@ enum MovePhase {
     Apply,
 }
 
-#[derive(Clone, Debug)]
-pub struct BlockPattern {
-    choices: Vec<WeightedBlock>,
-    total_weight: u32,
-}
-
-#[derive(Clone, Copy, Debug)]
-struct WeightedBlock {
-    state: u16,
-    weight: u32,
-}
-
-impl BlockPattern {
-    fn choose(&self, pos: BlockPos, seed: u64) -> u16 {
-        let mut cursor = position_hash(pos, seed) % u64::from(self.total_weight);
-        for choice in &self.choices {
-            let weight = u64::from(choice.weight);
-            if cursor < weight {
-                return choice.state;
-            }
-            cursor -= weight;
-        }
-        self.choices
-            .last()
-            .map(|choice| choice.state)
-            .unwrap_or_default()
-    }
-}
-
 enum EditKind {
     Set {
-        to: BlockPattern,
+        to: Arc<BlockPattern>,
     },
     Replace {
         from: u16,
-        to: BlockPattern,
+        to: Arc<BlockPattern>,
     },
     Move(MoveState),
     Replay {
@@ -289,6 +112,7 @@ pub struct EditOperation {
 }
 
 impl EditOperation {
+    /// Creates a deferred cuboid fill with a fresh seed for deterministic pattern choices.
     pub fn set(
         owner: String,
         world: World,
@@ -301,7 +125,7 @@ impl EditOperation {
             owner,
             world,
             world_id,
-            kind: EditKind::Set { to },
+            kind: EditKind::Set { to: Arc::new(to) },
             positions: EditPositions::cuboid(cuboid),
             history: Vec::new(),
             state,
@@ -311,6 +135,7 @@ impl EditOperation {
         }
     }
 
+    /// Creates a deferred edit that replaces only states matching `from` with pattern choices.
     pub fn replace(
         owner: String,
         world: World,
@@ -324,7 +149,10 @@ impl EditOperation {
             owner,
             world,
             world_id,
-            kind: EditKind::Replace { from, to },
+            kind: EditKind::Replace {
+                from,
+                to: Arc::new(to),
+            },
             positions: EditPositions::cuboid(cuboid),
             history: Vec::new(),
             state,
@@ -334,6 +162,7 @@ impl EditOperation {
         }
     }
 
+    /// Creates a deferred pattern fill of the cuboid's vertical faces without duplicate positions.
     pub fn walls(
         owner: String,
         world: World,
@@ -348,7 +177,7 @@ impl EditOperation {
             owner,
             world,
             world_id,
-            kind: EditKind::Set { to },
+            kind: EditKind::Set { to: Arc::new(to) },
             positions: EditPositions::vec(positions),
             history: Vec::new(),
             state,
@@ -388,48 +217,27 @@ impl EditOperation {
         }
     }
 
-    pub fn undo(
+    /// Creates a deferred history replay, traversing changes backward for undo and forward for redo.
+    pub fn replay(
         owner: String,
         world: World,
         history: HistoryEntry,
+        direction: ReplayDirection,
         state: Arc<Mutex<PluginState>>,
     ) -> Self {
-        let world_id = world.get_id();
         let remaining = history.len() as u64;
+        let next_index = match direction {
+            ReplayDirection::Undo => history.len(),
+            ReplayDirection::Redo => 0,
+        };
         Self {
             owner,
             world,
-            world_id,
-            kind: EditKind::Replay {
-                next_index: history.len(),
-                history,
-                direction: ReplayDirection::Undo,
-            },
-            positions: EditPositions::empty(),
-            history: Vec::new(),
-            state,
-            remaining,
-            chunk_cursor: None,
-            pattern_seed: 0,
-        }
-    }
-
-    pub fn redo(
-        owner: String,
-        world: World,
-        history: HistoryEntry,
-        state: Arc<Mutex<PluginState>>,
-    ) -> Self {
-        let world_id = world.get_id();
-        let remaining = history.len() as u64;
-        Self {
-            owner,
-            world,
-            world_id,
+            world_id: history.world_id().to_owned(),
             kind: EditKind::Replay {
                 history,
-                direction: ReplayDirection::Redo,
-                next_index: 0,
+                direction,
+                next_index,
             },
             positions: EditPositions::empty(),
             history: Vec::new(),
@@ -534,13 +342,14 @@ impl EditOperation {
         }
     }
 
+    /// Visits at most `budget` positions, applying the pattern and recording changes up to the history limit.
     fn process_forward(
         &mut self,
         budget: usize,
         config: &Config,
         writer: &WriteStrategy,
         replace_from: Option<u16>,
-        pattern: BlockPattern,
+        pattern: Arc<BlockPattern>,
     ) -> ProcessResult {
         let mut visited = 0;
 
@@ -551,18 +360,15 @@ impl EditOperation {
 
             visited += 1;
             let to = pattern.choose(pos, self.pattern_seed);
-            let old_state = writer.get_block_state_id(&self.world, &mut self.chunk_cursor, pos);
-            if replace_from.is_none_or(|from| from == old_state) && old_state != to {
-                writer.set_block_state(&self.world, &mut self.chunk_cursor, pos, to);
-                if self.history.len() < config.max_history_blocks {
-                    self.history.push(BlockChange {
-                        pos,
-                        old_state,
-                        new_state: to,
-                        old_block_entity: None,
-                        new_block_entity: None,
-                    });
-                }
+            let mut access = WorldAccess::new(&self.world, &mut self.chunk_cursor, writer);
+            if let Some(change) = apply_forward(
+                &mut access,
+                pos,
+                to,
+                replace_from,
+                self.history.len() < config.max_history_blocks,
+            ) {
+                self.history.push(change);
             }
             self.remaining = self.remaining.saturating_sub(1);
         }
@@ -809,18 +615,7 @@ impl ProcessResult {
     }
 }
 
-struct ChunkCursor {
-    x: i32,
-    z: i32,
-    chunk: Chunk,
-}
-
-struct WriteStrategy {
-    direct_chunk_writes: bool,
-    fallback_flags: BlockFlags,
-    entity_callback_flags: BlockFlags,
-}
-
+/// Replays at most `budget` history changes, restoring both block states and entity snapshots.
 fn process_replay(
     world: &World,
     history: &mut HistoryEntry,
@@ -835,20 +630,11 @@ fn process_replay(
         let Some(change) = next_replay_change(history, direction, next_index) else {
             return ProcessResult::Finished { scanned: visited };
         };
-        let state = match direction {
-            ReplayDirection::Undo => change.old_state,
-            ReplayDirection::Redo => change.new_state,
-        };
-        if change.old_block_entity.is_some() || change.new_block_entity.is_some() {
-            writer.set_block_state_with_entity_callbacks(world, change.pos, state);
-        } else {
-            writer.set_block_state(world, chunk_cursor, change.pos, state);
-        }
-        let block_entity = match direction {
-            ReplayDirection::Undo => change.old_block_entity.as_deref(),
-            ReplayDirection::Redo => change.new_block_entity.as_deref(),
-        };
-        writer.set_block_entity(world, change.pos, block_entity);
+        replay_change(
+            &mut WorldAccess::new(world, chunk_cursor, writer),
+            change,
+            direction,
+        );
         visited += 1;
     }
     ProcessResult::Pending { scanned: visited }
@@ -872,195 +658,12 @@ fn next_replay_change<'a>(
     }
 }
 
-impl WriteStrategy {
-    fn new(config: &Config) -> Self {
-        Self {
-            // Direct chunk writes avoid world-level neighbor update paths.
-            direct_chunk_writes: config.fast_mode,
-            fallback_flags: block_flags(config),
-            entity_callback_flags: block_entity_flags(config),
-        }
-    }
-
-    fn get_block_state_id(
-        &self,
-        world: &World,
-        chunk_cursor: &mut Option<ChunkCursor>,
-        pos: BlockPos,
-    ) -> u16 {
-        self.chunk(world, chunk_cursor, pos).map_or_else(
-            || world.get_block_state_id(pos.into()),
-            |chunk| chunk.get_block_state_id(local_chunk_pos(pos)),
-        )
-    }
-
-    fn set_block_state(
-        &self,
-        world: &World,
-        chunk_cursor: &mut Option<ChunkCursor>,
-        pos: BlockPos,
-        state: u16,
-    ) {
-        if let Some(chunk) = self.chunk(world, chunk_cursor, pos) {
-            chunk.set_block_state(local_chunk_pos(pos), state);
-            return;
-        }
-
-        world.set_block_state(pos.into(), state, self.fallback_flags);
-    }
-
-    fn set_block_entity(&self, world: &World, pos: BlockPos, nbt: Option<&[u8]>) {
-        let Some(nbt) = nbt else {
-            return;
-        };
-        let _ = world.set_block_entity_nbt(pos.into(), nbt);
-    }
-
-    fn set_block_state_with_entity_callbacks(&self, world: &World, pos: BlockPos, state: u16) {
-        world.set_block_state(pos.into(), state, self.entity_callback_flags);
-    }
-
-    fn chunk<'a>(
-        &self,
-        world: &World,
-        chunk_cursor: &'a mut Option<ChunkCursor>,
-        pos: BlockPos,
-    ) -> Option<&'a Chunk> {
-        if !self.direct_chunk_writes {
-            return None;
-        }
-
-        let chunk_x = pos.x.div_euclid(16);
-        let chunk_z = pos.z.div_euclid(16);
-        let cached = chunk_cursor
-            .as_ref()
-            .is_some_and(|cursor| cursor.x == chunk_x && cursor.z == chunk_z);
-        if !cached {
-            *chunk_cursor = world.get_chunk(chunk_x, chunk_z).map(|chunk| ChunkCursor {
-                x: chunk_x,
-                z: chunk_z,
-                chunk,
-            });
-        }
-
-        chunk_cursor.as_ref().map(|cursor| &cursor.chunk)
-    }
-}
-
-fn local_chunk_pos(pos: BlockPos) -> WitBlockPos {
-    WitBlockPos {
-        x: pos.x.rem_euclid(16),
-        y: pos.y,
-        z: pos.z.rem_euclid(16),
-    }
-}
-
-fn block_flags(config: &Config) -> BlockFlags {
-    let mut flags = BlockFlags::empty();
-
-    if config.notify_clients {
-        flags = flags | BlockFlags::NOTIFY_LISTENERS;
-    }
-
-    if !config.fast_mode {
-        flags = flags | BlockFlags::NOTIFY_NEIGHBORS;
-    } else {
-        // Fallback path for unloaded chunks: keep it no-physics as far as Pumpkin allows.
-        flags = flags
-            | BlockFlags::SKIP_DROPS
-            | BlockFlags::SKIP_REDSTONE_WIRE_STATE_REPLACEMENT
-            | BlockFlags::SKIP_BLOCK_ENTITY_REPLACED_CALLBACK
-            | BlockFlags::SKIP_BLOCK_ADDED_CALLBACK;
-    }
-
-    flags
-}
-
-fn block_entity_flags(config: &Config) -> BlockFlags {
-    let mut flags = BlockFlags::FORCE_STATE;
-
-    if config.notify_clients {
-        flags = flags | BlockFlags::NOTIFY_LISTENERS;
-    }
-
-    if !config.fast_mode {
-        flags = flags | BlockFlags::NOTIFY_NEIGHBORS;
-    } else {
-        flags = flags | BlockFlags::SKIP_DROPS | BlockFlags::SKIP_REDSTONE_WIRE_STATE_REPLACEMENT;
-    }
-
-    flags
-}
-
-pub fn parse_block_state(input: &str) -> Result<u16, String> {
-    let trimmed = input.trim();
-    if let Ok(state_id) = trimmed.parse::<u16>() {
-        return Ok(state_id);
-    }
-    let trimmed = trimmed.strip_prefix("minecraft:").unwrap_or(trimmed);
-    let key = block_state_key(trimmed);
-
-    generated_blocks::BLOCK_STATES
-        .binary_search_by_key(&key, |(key, _)| *key)
-        .map(|index| generated_blocks::BLOCK_STATES[index].1)
-        .map_err(|_| format!("unknown block state `{input}`"))
-}
-
-/// Returns the generated block-state names used for command suggestions.
-pub fn block_state_names() -> &'static [&'static str] {
-    generated_blocks::BLOCK_STATE_NAMES
-}
-
-pub fn parse_block_pattern(input: &str) -> Result<BlockPattern, String> {
-    let mut choices = Vec::new();
-    let mut total_weight = 0_u32;
-
-    for part in input.split(',') {
-        let part = part.trim();
-        if part.is_empty() {
-            return Err("empty block in pattern".to_owned());
-        }
-        let (weight, block) = parse_weighted_block(part)?;
-        let state = parse_block_state(block)?;
-        total_weight = total_weight
-            .checked_add(weight)
-            .ok_or_else(|| "pattern weights are too large".to_owned())?;
-        choices.push(WeightedBlock { state, weight });
-    }
-
-    if choices.is_empty() {
-        return Err("empty block pattern".to_owned());
-    }
-
-    Ok(BlockPattern {
-        choices,
-        total_weight,
-    })
-}
-
-fn parse_weighted_block(input: &str) -> Result<(u32, &str), String> {
-    let Some((weight, block)) = input.split_once('%') else {
-        return Ok((1, input));
-    };
-    let weight = weight
-        .trim()
-        .parse::<u32>()
-        .map_err(|err| format!("invalid pattern weight `{}`: {err}", weight.trim()))?;
-    if weight == 0 {
-        return Err("pattern weights must be greater than 0".to_owned());
-    }
-    let block = block.trim();
-    if block.is_empty() {
-        return Err("missing block after pattern weight".to_owned());
-    }
-    Ok((weight, block))
-}
-
 fn next_pattern_seed() -> u64 {
     PATTERN_SEED.fetch_add(1, Ordering::Relaxed)
 }
 
-fn position_hash(pos: BlockPos, seed: u64) -> u64 {
+/// Hashes signed block coordinates with an edit seed for deterministic pattern selection.
+pub(super) fn position_hash(pos: BlockPos, seed: u64) -> u64 {
     let mut hash = 0xcbf29ce484222325_u64 ^ seed;
     for value in [pos.x, pos.y, pos.z] {
         for byte in value.to_le_bytes() {
@@ -1070,21 +673,9 @@ fn position_hash(pos: BlockPos, seed: u64) -> u64 {
     hash
 }
 
-fn block_state_key(input: &str) -> u64 {
-    const OFFSET: u64 = 0xcbf29ce484222325;
-    const PRIME: u64 = 0x100000001b3;
-
-    input.as_bytes().iter().fold(OFFSET, |hash, byte| {
-        (hash ^ u64::from(*byte)).wrapping_mul(PRIME)
-    })
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{
-        build_move_cells, local_chunk_pos, parse_block_pattern, parse_block_state, BlockPos,
-        BlockSnapshot, Cuboid, MovePhase, MoveState,
-    };
+    use super::{build_move_cells, BlockPos, BlockSnapshot, Cuboid, MovePhase, MoveState};
     use std::collections::{HashMap, HashSet};
 
     #[test]
@@ -1147,61 +738,28 @@ mod tests {
         assert_unique(&positions);
     }
 
+    /// Checks that wall counts match generated positions for thin and ordinary cuboids.
     #[test]
-    fn block_parser_resolves_namespaced_default_state() {
-        assert_eq!(parse_block_state("minecraft:stone").unwrap(), 1);
+    fn wall_counts_match_positions_for_thin_and_normal_selections() {
+        for x in 1..=4 {
+            for y in 1..=4 {
+                for z in 1..=4 {
+                    let cuboid = Cuboid::new(pos(0, 0, 0), pos(x - 1, y - 1, z - 1));
+                    assert_eq!(cuboid.wall_volume(), cuboid.wall_positions().len() as u64);
+                }
+            }
+        }
     }
 
+    /// Checks that extreme cuboid counts saturate instead of overflowing or allocating walls.
     #[test]
-    fn block_parser_resolves_generated_property_state() {
-        assert!(parse_block_state("oak_log[axis=x]").is_ok());
-    }
-
-    #[test]
-    fn block_parser_resolves_namespaced_property_state() {
-        assert_eq!(
-            parse_block_state("minecraft:oak_log[axis=x]").unwrap(),
-            parse_block_state("oak_log[axis=x]").unwrap()
+    fn huge_selections_saturate_without_overflow_or_allocating_walls() {
+        let cuboid = Cuboid::new(
+            pos(i32::MIN, i32::MIN, i32::MIN),
+            pos(i32::MAX, i32::MAX, i32::MAX),
         );
-    }
-
-    #[test]
-    fn block_parser_keeps_numeric_state_ids_available() {
-        assert_eq!(parse_block_state("42").unwrap(), 42);
-    }
-
-    #[test]
-    fn block_pattern_accepts_weighted_entries() {
-        let pattern = parse_block_pattern("50%dirt,50%grass_block").unwrap();
-
-        assert_eq!(pattern.total_weight, 100);
-        assert_eq!(pattern.choices.len(), 2);
-    }
-
-    #[test]
-    fn block_pattern_keeps_single_blocks_available() {
-        let pattern = parse_block_pattern("stone").unwrap();
-
-        assert_eq!(pattern.total_weight, 1);
-        assert_eq!(pattern.choose(BlockPos { x: 0, y: 0, z: 0 }, 0), 1);
-    }
-
-    #[test]
-    fn block_pattern_rejects_zero_weight() {
-        assert!(parse_block_pattern("0%dirt,100%grass_block").is_err());
-    }
-
-    #[test]
-    fn local_chunk_pos_handles_negative_coordinates() {
-        let pos = local_chunk_pos(BlockPos {
-            x: -1,
-            y: 64,
-            z: -17,
-        });
-
-        assert_eq!(pos.x, 15);
-        assert_eq!(pos.y, 64);
-        assert_eq!(pos.z, 15);
+        assert_eq!(cuboid.volume(), u64::MAX);
+        assert_eq!(cuboid.wall_volume(), u64::MAX);
     }
 
     #[test]

@@ -9,6 +9,11 @@ navigation:
 
 WorldPumpkin builds to a WebAssembly plugin file for Pumpkin.
 
+The current source targets Pumpkin `0.2.0+26.3-26.51` at revision
+`742beaf6f9f84fb99a04402434f6c6feb86667d1`. Use a server with a compatible
+plugin API. Block names and state IDs are resolved from the running server.
+Check the compatibility notes for the release you download.
+
 ## Download
 
 Download the release artifact for the current package version.
@@ -28,10 +33,10 @@ Download the release artifact for the current package version.
 
 ## Build From Source
 
-This repo uses Rust nightly and the `wasm32-wasip2` target.
+This repo uses stable Rust (1.96 or newer) and the `wasm32-wasip2` target.
 
 ```bash
-rustup toolchain install nightly --profile minimal --target wasm32-wasip2
+rustup toolchain install stable --profile minimal --target wasm32-wasip2
 cargo build --locked --release --target wasm32-wasip2
 ```
 

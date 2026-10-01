@@ -1,6 +1,7 @@
 // Copyright (c) 2026 NicDevTV
 // SPDX-License-Identifier: MIT
 
+mod blocks;
 mod commands;
 mod config;
 mod engine;

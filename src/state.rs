@@ -29,8 +29,19 @@ impl PluginState {
         self.prune_all_history();
     }
 
-    pub fn set_position(&mut self, owner: String, slot: SelectionSlot, pos: BlockPos) -> Selection {
+    /// Stores an endpoint for the owner, resetting the previous selection when the world changes.
+    pub fn set_position(
+        &mut self,
+        owner: String,
+        world_id: String,
+        slot: SelectionSlot,
+        pos: BlockPos,
+    ) -> Selection {
         let session = self.sessions.entry(owner).or_default();
+        if session.selection_world != world_id {
+            session.selection = Selection::default();
+            session.selection_world = world_id;
+        }
         match slot {
             SelectionSlot::Pos1 => session.selection.pos1 = Some(pos),
             SelectionSlot::Pos2 => session.selection.pos2 = Some(pos),
@@ -38,8 +49,12 @@ impl PluginState {
         session.selection
     }
 
-    pub fn selection(&self, owner: &str) -> Option<Selection> {
-        self.sessions.get(owner).map(|session| session.selection)
+    /// Returns the owner's selection only when it belongs to the requested world.
+    pub fn selection(&self, owner: &str, world_id: &str) -> Option<Selection> {
+        self.sessions
+            .get(owner)
+            .filter(|session| session.selection_world == world_id)
+            .map(|session| session.selection)
     }
 
     pub fn push_undo_history(&mut self, owner: String, entry: HistoryEntry) {
@@ -123,6 +138,7 @@ pub struct HistoryInfo {
 #[derive(Default)]
 struct PlayerSession {
     selection: Selection,
+    selection_world: String,
     undo_history: VecDeque<HistoryEntry>,
     redo_history: VecDeque<HistoryEntry>,
     undo_blocks: usize,
@@ -180,5 +196,28 @@ fn prune_history(
             return;
         };
         *block_count = block_count.saturating_sub(entry.len());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    /// Checks that changing worlds clears old endpoints and hides selections from other worlds.
+    #[test]
+    fn selections_cannot_cross_worlds() {
+        let mut state = PluginState::new(Config::default());
+        let pos = BlockPos { x: 1, y: 2, z: 3 };
+        state.set_position(
+            "player".into(),
+            "overworld".into(),
+            SelectionSlot::Pos1,
+            pos,
+        );
+        assert!(state.selection("player", "nether").is_none());
+        let selection =
+            state.set_position("player".into(), "nether".into(), SelectionSlot::Pos2, pos);
+        assert!(selection.pos1.is_none());
+        assert_eq!(selection.pos2, Some(pos));
+        assert!(state.selection("player", "overworld").is_none());
     }
 }

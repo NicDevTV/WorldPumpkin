@@ -27,6 +27,20 @@ Fill the selected area:
 //set stone
 ```
 
+Coordinates can be explicit or relative to your current position:
+
+```text
+//pos1 10 64 10
+//pos2 ~10 ~5 ~10
+```
+
+Set a block with multiple properties, or mix it with another block:
+
+```text
+//set oak_stairs[facing=north,half=top]
+//set 50%oak_stairs[facing=north,half=top],50%stone
+```
+
 ## Replace A Block Type
 
 Replace dirt with grass blocks inside the selection:

@@ -1,4 +1,4 @@
-use crate::engine::block_state_names;
+use crate::blocks::{pattern_token_start, suggestions};
 use pumpkin_plugin_api::{
     command::{CommandSender, CommandSuggestion, CommandSuggestions, SuggestionRequest},
     commands::CommandSuggestionHandler,
@@ -19,9 +19,7 @@ impl CommandSuggestionHandler for PatternSuggestionHandler {
         request: SuggestionRequest,
     ) -> CommandSuggestions {
         let input = request.input.as_str();
-        let token_start = input
-            .rfind([' ', ','])
-            .map_or(request.start as usize, |index| index + 1);
+        let token_start = pattern_token_start(input, request.start as usize);
         let block_start = input[token_start..]
             .rfind('%')
             .map_or(token_start, |index| token_start + index + 1);
@@ -33,12 +31,10 @@ impl CommandSuggestionHandler for PatternSuggestionHandler {
             block_start
         };
 
-        let values = block_state_names()
-            .iter()
-            .filter(|name| name.starts_with(prefix))
-            .take(MAX_SUGGESTIONS)
+        let values = suggestions(prefix, MAX_SUGGESTIONS)
+            .into_iter()
             .map(|name| CommandSuggestion {
-                value: (*name).to_owned(),
+                value: name,
                 tooltip: None,
             })
             .collect();
