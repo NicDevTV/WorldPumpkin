@@ -1,7 +1,9 @@
 /target/
 *.wasm
+.DS_Store
 
 docs/.data/
 docs/.nuxt/
 docs/.output/
+docs/dist/
 docs/node_modules/

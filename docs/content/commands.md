@@ -36,7 +36,10 @@ Directions are `north`, `south`, `east`, `west`, `up`, and `down`. Short forms a
 | `//walls <block>` | Build the outer walls of the selection. |
 | `//move <amount> [direction]` | Move the selection contents, defaulting to the direction you are facing. |
 
-Block arguments use Pumpkin block state parsing. Examples: `stone`, `minecraft:stone`, or block states such as `oak_stairs[facing=north]` when supported by the server parser.
+Block arguments are resolved through the running server's block registry. Examples:
+`stone`, `minecraft:stone`, or `oak_stairs[facing=north,half=top]`. Properties can
+be given in any order; omitted properties use the server's defaults. Weighted
+patterns work too: `//set 50%stone,50%dirt`.
 
 ## History
 
@@ -46,6 +49,9 @@ Block arguments use Pumpkin block state parsing. Examples: `stone`, `minecraft:s
 | `//redo` | Redo your latest undone WorldPumpkin edit in the current world. |
 
 Undo and redo are per player and must be used in the same world as the original edit.
+They restore block-entity NBT, including inventories and sign text, for `set`,
+`replace`, `walls`, and `move`. History is limited by the configuration and is
+lost when the server restarts.
 
 ## Administration
 

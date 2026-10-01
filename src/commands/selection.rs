@@ -73,9 +73,14 @@ pub(super) fn handle_player_chunk(
         y: chunk_top_y(&player.get_world(), min),
         z: min.z + 15,
     };
-    set_player_selection(player.get_name(), state, min, max, |message| {
-        send_player_ok(player, message)
-    });
+    set_player_selection(
+        player.get_name(),
+        player.get_world().get_id(),
+        state,
+        min,
+        max,
+        |message| send_player_ok(player, message),
+    );
     Ok(())
 }
 
@@ -126,9 +131,14 @@ impl CommandHandler for ChunkCommand {
             y: chunk_top_y(&world, min),
             z: min.z + 15,
         };
-        set_player_selection(sender.get_name(), &self.state, min, max, |message| {
-            send_ok(&sender, message)
-        });
+        set_player_selection(
+            sender.get_name(),
+            world.get_id(),
+            &self.state,
+            min,
+            max,
+            |message| send_ok(&sender, message),
+        );
         Ok(1)
     }
 }
@@ -182,11 +192,13 @@ impl CommandHandler for HposCommand {
             .as_player()
             .ok_or_else(|| command_failed("Only players can select a targeted block."))?;
         let pos = target_block(&player).map_err(command_failed)?;
+        let owner = sender.get_name();
+        let world_id = player.get_world().get_id();
         let selection = self
             .state
             .lock()
             .unwrap()
-            .set_position(sender.get_name(), self.slot, pos);
+            .set_position(owner, world_id, self.slot, pos);
         send_ok(&sender, &selection_message(selection));
         Ok(1)
     }
@@ -194,14 +206,15 @@ impl CommandHandler for HposCommand {
 
 fn set_player_selection(
     owner: String,
+    world_id: String,
     state: &Arc<Mutex<PluginState>>,
     min: BlockPos,
     max: BlockPos,
     send: impl FnOnce(&str),
 ) {
     let mut state = state.lock().unwrap();
-    state.set_position(owner.clone(), SelectionSlot::Pos1, min);
-    let selection = state.set_position(owner, SelectionSlot::Pos2, max);
+    state.set_position(owner.clone(), world_id.clone(), SelectionSlot::Pos1, min);
+    let selection = state.set_position(owner, world_id, SelectionSlot::Pos2, max);
     drop(state);
     send(&selection_message(selection));
 }
@@ -220,9 +233,10 @@ fn expand_selection(
     request: ExpandRequest,
     world: Option<&pumpkin_plugin_api::world::World>,
 ) -> Result<Selection, String> {
+    let world_id = world.map(|world| world.get_id()).unwrap_or_default();
     let mut state = state.lock().unwrap();
     let selection = state
-        .selection(&owner)
+        .selection(&owner, &world_id)
         .ok_or_else(|| "Select two positions first.".to_owned())?;
     let mut cuboid = ExpandedCuboid::from_selection(selection)?;
     match request {
@@ -242,8 +256,13 @@ fn expand_selection(
             cuboid.max.y = world_max_y(world);
         }
     }
-    state.set_position(owner.clone(), SelectionSlot::Pos1, cuboid.min);
-    Ok(state.set_position(owner, SelectionSlot::Pos2, cuboid.max))
+    state.set_position(
+        owner.clone(),
+        world_id.clone(),
+        SelectionSlot::Pos1,
+        cuboid.min,
+    );
+    Ok(state.set_position(owner, world_id, SelectionSlot::Pos2, cuboid.max))
 }
 
 fn chunk_top_y(world: &pumpkin_plugin_api::world::World, min: BlockPos) -> i32 {
