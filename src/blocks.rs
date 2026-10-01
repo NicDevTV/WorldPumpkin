@@ -241,19 +241,20 @@ pub(crate) fn suggestions(prefix: &str, limit: usize) -> Vec<String> {
             return matching_names(names, prefix, limit);
         }
         // Host calls can re-enter the plugin, so don't hold the cache lock while fetching.
-        let mut names = world::get_block_by_name(name).map_or_else(Vec::new, |block| {
-            world::get_state_ids_for_block_id(block.id)
-                .into_iter()
-                .map(|state| {
-                    let properties = world::get_block_properties(state)
-                        .into_iter()
-                        .map(|(key, value)| format!("{key}={value}"))
-                        .collect::<Vec<_>>()
-                        .join(",");
-                    format!("{name}[{properties}]")
-                })
-                .collect::<Vec<_>>()
-        });
+        let Some(block) = world::get_block_by_name(name) else {
+            return Vec::new();
+        };
+        let mut names = world::get_state_ids_for_block_id(block.id)
+            .into_iter()
+            .map(|state| {
+                let properties = world::get_block_properties(state)
+                    .into_iter()
+                    .map(|(key, value)| format!("{key}={value}"))
+                    .collect::<Vec<_>>()
+                    .join(",");
+                format!("{name}[{properties}]")
+            })
+            .collect::<Vec<_>>();
         names.sort_unstable();
         names.dedup();
         let result = matching_names(&names, prefix, limit);
