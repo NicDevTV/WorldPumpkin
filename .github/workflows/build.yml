@@ -209,7 +209,7 @@ jobs:
           echo "RELEASE_ID=$release_id" >> "$GITHUB_ENV"
           mkdir verify
           for name in "$ASSET_NAME" "$ASSET_NAME.sha256"; do
-            asset_id=$(gh api "repos/$GITHUB_REPOSITORY/releases/$release_id/assets" \
+            asset_id=$(gh api "repos/$GITHUB_REPOSITORY/releases/$release_id/assets" --paginate \
               --jq ".[] | select(.name == \"$name\") | .id")
             [[ -n "$asset_id" ]] || { echo "Missing asset $name"; exit 1; }
             gh api -H "Accept: application/octet-stream" \

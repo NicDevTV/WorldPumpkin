@@ -65,11 +65,20 @@ gh workflow run build.yml -f tag=v0.1.0 -f publish=false
 gh workflow run docs.yml
 ```
 
+## Trust Model
+
+The release gate assumes that everyone with write access is trusted. The `release`
+environment protects the publish job, but a writer who can run a modified workflow
+from a branch could skip it, publish a release directly or replace draft assets
+between verification and publishing. This repository has a single owner, so that is
+acceptable; add collaborators only with this in mind. Published releases are immutable.
+
 ## Dependency Updates
 
 Dependabot checks Cargo (the plugin and the release version tool), the wiki's npm
 packages and GitHub Actions every Monday. Minor and patch updates are grouped into one
-pull request per ecosystem, and new releases wait three days (seven for major
+pull request per ecosystem and directory (so the plugin and the version tool each get
+one Cargo pull request), and new releases wait three days (seven for major
 versions) before being proposed. Security updates are not delayed. The Pumpkin plugin
 API is pinned to a commit in `Cargo.toml` and is bumped by hand.
 
@@ -90,7 +99,8 @@ Import ruleset).
   merges only, linear history, no force pushes or deletion. Admins cannot push
   directly; they can only bypass the checks inside a pull request.
   Paths that can change the build or the protection itself (`.github/`,
-  `.coderabbit.yaml`, `SECURITY.md`, `build.rs`, `build/`, `tools/`) are listed in
+  `.coderabbit.yaml`, `SECURITY.md`, `build.rs`, `build/`, `tools/`, `Cargo.toml`,
+  `Cargo.lock`, `rust-toolchain.toml`) are listed in
   `CODEOWNERS` and need the owner's approval; a review bot approval does not
   count for them. This stops a pull request from loosening its own review rules.
 - **Protect release tags:** `v*` tags cannot be moved or deleted. Creating them is
