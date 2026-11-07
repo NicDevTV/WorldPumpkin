@@ -24,8 +24,10 @@ Download the release artifact for the current package version.
 ::artifact-name
 ::
 
-Each release also has a `world_pumpkin.wasm.sha256` file. Verify the download with
-`sha256sum -c world_pumpkin.wasm.sha256`.
+Releases built with the current release workflow also have a `world_pumpkin.wasm.sha256`
+file. Verify the download with `sha256sum -c world_pumpkin.wasm.sha256`. Older releases,
+including v0.1.0, have no checksum file; compare against the digest GitHub shows for
+the asset instead.
 
 ## Install
 

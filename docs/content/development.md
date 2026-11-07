@@ -9,6 +9,10 @@ navigation:
 
 ## Build
 
+Use a rustup-managed Cargo with the toolchain from
+[Build From Source](/installation#build-from-source), so `rust-toolchain.toml` and the
+`wasm32-wasip2` target apply before running these commands.
+
 ```bash
 cargo test --locked --lib
 cargo clippy --locked --target wasm32-wasip2 --all-targets -- -D warnings
@@ -31,7 +35,7 @@ commit. Without Git the suffix is `dev.0`.
 | Workflow | Trigger | What it does |
 | --- | --- | --- |
 | CI | push to `main`, pull requests | Format, tests, clippy, Wasm build, size report, artifact upload. |
-| Build Release | manual | Builds and publishes a release (see below). |
+| Build Release | manual | Builds a release and creates or updates a draft; publishes only when `publish` is enabled (see below). |
 | Deploy Wiki | push to `docs/**`, release published, manual | Builds the Nuxt wiki and deploys it to GitHub Pages. |
 
 ## Releasing
@@ -46,7 +50,10 @@ The workflow sets the version in `Cargo.toml` and `Cargo.lock` in its checkout,
 runs all checks, builds the Wasm file and attaches `world_pumpkin.wasm` plus
 `world_pumpkin.wasm.sha256` to the release with generated notes. The run summary
 shows the file size and hash. Rerunning updates an existing draft; published
-releases are never replaced.
+releases are never replaced. Before publishing, the workflow checks that an
+existing tag points at the built commit and that the uploaded Wasm and checksum
+match. Rerunning with `publish` for an already published release only retries the
+wiki deploy, which always builds from `main`.
 
 From the command line:
 

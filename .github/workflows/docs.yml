@@ -31,6 +31,9 @@ jobs:
     steps:
       - name: Checkout WorldPumpkin
         uses: actions/checkout@v7
+        with:
+          # Release events run on the tag; the wiki always comes from main.
+          ref: ${{ github.event_name == 'release' && github.event.repository.default_branch || github.sha }}
 
       - name: Enable Corepack
         run: corepack enable
