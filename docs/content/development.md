@@ -44,15 +44,17 @@ commit. Without Git the suffix is `dev.0`.
 2. Enter a tag such as `v0.1.0` or `v0.2.0-rc.1`. Tags with a `-` suffix become
    prereleases.
 3. Leave **publish** off to get a draft you can review, or turn it on to publish
-   right away. Publishing also triggers the wiki deploy.
+   after the build. Publishing runs in a separate job that waits for approval of
+   the `release` environment, then triggers the wiki deploy.
 
 The workflow sets the version in `Cargo.toml` and `Cargo.lock` in its checkout,
 runs all checks, builds the Wasm file and attaches `world_pumpkin.wasm` plus
 `world_pumpkin.wasm.sha256` to the release with generated notes. The run summary
 shows the file size and hash. Rerunning updates an existing draft; published
-releases are never replaced. Before publishing, the workflow checks that an
-existing tag points at the built commit and that the uploaded Wasm and checksum
-match. Rerunning with `publish` for an already published release only retries the
+releases are never replaced. Before building, the workflow checks that an
+existing tag points at the built commit. Before publishing, the publish job
+downloads the draft assets, verifies the checksum and compares the Wasm hash with
+the one the build job produced, so only the built file can be published. Rerunning with `publish` for an already published release only retries the
 wiki deploy, which always builds from `main`.
 
 From the command line:
@@ -75,7 +77,7 @@ The rulesets are active on the repository, and their definitions are kept in
 `.github/rulesets/` for reference and for re-importing (Settings, Rules, Rulesets,
 Import ruleset).
 
-- **Protect main:** changes need a pull request with a passing `Rust` check, squash
+- **Protect main:** changes need a pull request with one approval, a passing `Rust` check, squash
   merges only, linear history, no force pushes or deletion. Admins cannot push
   directly; they can only bypass the checks inside a pull request.
 - **Protect release tags:** `v*` tags cannot be moved or deleted. Creating them is
@@ -83,3 +85,7 @@ Import ruleset).
 
 Secret scanning with push protection, Dependabot alerts and security updates are
 enabled, and workflows get read-only tokens by default.
+
+Publishing goes through the `release` environment: it requires an approval and only
+runs from `main`. Immutable releases are enabled, so once a release is published its
+tag and assets can no longer be changed or deleted.

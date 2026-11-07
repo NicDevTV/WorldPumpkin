@@ -8,7 +8,7 @@ on:
         required: true
         type: string
       publish:
-        description: "Publish immediately instead of leaving a draft"
+        description: "Publish after the build (needs approval of the release environment)"
         required: false
         default: false
         type: boolean
@@ -22,8 +22,7 @@ env:
   WORLDPUMPKIN_RELEASE_BUILD: "true"
 
 permissions:
-  contents: write
-  actions: write
+  contents: read
 
 concurrency:
   group: release-${{ inputs.tag }}
@@ -33,6 +32,11 @@ jobs:
   build:
     name: Build Draft Release
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      published: ${{ steps.state.outputs.published }}
+      sha256: ${{ steps.bundle.outputs.sha256 }}
 
     steps:
       - name: Checkout WorldPumpkin
@@ -107,16 +111,19 @@ jobs:
         run: cargo build --locked --release --target wasm32-wasip2
 
       - name: Create release bundle
+        id: bundle
         if: ${{ steps.state.outputs.published != 'true' }}
         run: |
           mkdir -p dist
           cp "$PLUGIN_WASM" "dist/$ASSET_NAME"
           (cd dist && sha256sum "$ASSET_NAME" > "$ASSET_NAME.sha256")
+          hash=$(cut -d' ' -f1 "dist/$ASSET_NAME.sha256")
           size=$(stat -c %s "dist/$ASSET_NAME")
+          echo "sha256=$hash" >> "$GITHUB_OUTPUT"
           {
             echo "### Release $RELEASE_TAG"
             echo "- \`$ASSET_NAME\`: $size bytes ($((size / 1024)) KiB)"
-            echo "- sha256: \`$(cut -d' ' -f1 "dist/$ASSET_NAME.sha256")\`"
+            echo "- sha256: \`$hash\`"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload bundle artifact
@@ -137,11 +144,7 @@ jobs:
           if [[ "${RELEASE_TAG%%+*}" == *-* ]]; then
             prerelease=true
           fi
-          if existing=$(gh release view "$RELEASE_TAG" --json isDraft --jq '.isDraft'); then
-            if [[ "$existing" != "true" ]]; then
-              echo "Release $RELEASE_TAG is already published. Use a new tag."
-              exit 1
-            fi
+          if gh release view "$RELEASE_TAG" --json isDraft >/dev/null 2>&1; then
             gh release edit "$RELEASE_TAG" --target "$GITHUB_SHA" --prerelease="$prerelease"
             gh release upload "$RELEASE_TAG" "dist/$ASSET_NAME" "dist/$ASSET_NAME.sha256" --clobber
           else
@@ -158,24 +161,52 @@ jobs:
               "dist/$ASSET_NAME" "dist/$ASSET_NAME.sha256"
           fi
 
-      - name: Verify release assets
-        if: ${{ inputs.publish && steps.state.outputs.published != 'true' }}
-        env:
-          GH_TOKEN: ${{ github.token }}
+  publish:
+    name: Publish Release
+    needs: build
+    if: ${{ inputs.publish }}
+    runs-on: ubuntu-latest
+    # Needs approval and only runs from the allowed branches of this environment.
+    environment:
+      name: release
+      url: ${{ github.server_url }}/${{ github.repository }}/releases/tag/${{ inputs.tag }}
+    permissions:
+      contents: write
+      actions: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      EXPECTED_SHA256: ${{ needs.build.outputs.sha256 }}
+      ALREADY_PUBLISHED: ${{ needs.build.outputs.published }}
+
+    steps:
+      - name: Verify draft assets
+        if: ${{ env.ALREADY_PUBLISHED != 'true' }}
         run: |
+          release_id=$(gh api "repos/$GITHUB_REPOSITORY/releases" --paginate \
+            --jq ".[] | select(.tag_name == \"$RELEASE_TAG\" and .draft) | .id")
+          if [[ -z "$release_id" || "$release_id" == *$'\n'* ]]; then
+            echo "Expected exactly one draft for $RELEASE_TAG"
+            exit 1
+          fi
+          echo "RELEASE_ID=$release_id" >> "$GITHUB_ENV"
           mkdir verify
-          gh release download "$RELEASE_TAG" --dir verify             --pattern "$ASSET_NAME" --pattern "$ASSET_NAME.sha256"
+          for name in "$ASSET_NAME" "$ASSET_NAME.sha256"; do
+            asset_id=$(gh api "repos/$GITHUB_REPOSITORY/releases/$release_id/assets" \
+              --jq ".[] | select(.name == \"$name\") | .id")
+            [[ -n "$asset_id" ]] || { echo "Missing asset $name"; exit 1; }
+            gh api -H "Accept: application/octet-stream" \
+              "repos/$GITHUB_REPOSITORY/releases/assets/$asset_id" > "verify/$name"
+          done
           (cd verify && sha256sum -c "$ASSET_NAME.sha256")
-          cmp "verify/$ASSET_NAME" "dist/$ASSET_NAME"
+          actual=$(sha256sum "verify/$ASSET_NAME" | cut -d' ' -f1)
+          if [[ "$actual" != "$EXPECTED_SHA256" ]]; then
+            echo "Draft Wasm ($actual) does not match the build output ($EXPECTED_SHA256)."
+            exit 1
+          fi
 
       - name: Publish release
-        if: ${{ inputs.publish && steps.state.outputs.published != 'true' }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh release edit "$RELEASE_TAG" --draft=false
+        if: ${{ env.ALREADY_PUBLISHED != 'true' }}
+        run: gh api -X PATCH "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" -F draft=false
 
       - name: Deploy wiki
-        if: ${{ inputs.publish }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh workflow run docs.yml --ref "${{ github.event.repository.default_branch }}"
+        run: gh workflow run docs.yml --repo "$GITHUB_REPOSITORY" --ref "${{ github.event.repository.default_branch }}"
