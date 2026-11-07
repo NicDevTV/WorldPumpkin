@@ -147,6 +147,16 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # Re-check right before attaching assets: an existing tag must still
+          # point at the built commit.
+          tag_sha=$(git ls-remote origin "refs/tags/$RELEASE_TAG^{}" | cut -f1)
+          if [[ -z "$tag_sha" ]]; then
+            tag_sha=$(git ls-remote origin "refs/tags/$RELEASE_TAG" | cut -f1)
+          fi
+          if [[ -n "$tag_sha" && "$tag_sha" != "$GITHUB_SHA" ]]; then
+            echo "Tag $RELEASE_TAG points to $tag_sha, not $GITHUB_SHA."
+            exit 1
+          fi
           prerelease=false
           if [[ "${RELEASE_TAG%%+*}" == *-* ]]; then
             prerelease=true

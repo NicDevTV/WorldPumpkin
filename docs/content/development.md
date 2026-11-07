@@ -65,6 +65,14 @@ gh workflow run build.yml -f tag=v0.1.0 -f publish=false
 gh workflow run docs.yml
 ```
 
+## Dependency Updates
+
+Dependabot checks Cargo (the plugin and the release version tool), the wiki's npm
+packages and GitHub Actions every Monday. Minor and patch updates are grouped into one
+pull request per ecosystem, and new releases wait three days (seven for major
+versions) before being proposed. Security updates are not delayed. The Pumpkin plugin
+API is pinned to a commit in `Cargo.toml` and is bumped by hand.
+
 ## Pumpkin Market
 
 GitHub Releases are the only publishing channel. [Pumpkin Market](https://market.pumpkinmc.org)
