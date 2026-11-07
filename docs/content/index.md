@@ -38,3 +38,4 @@ Commands can be typed with the double-slash form shown above. WorldPumpkin also 
 - [Commands](/commands)
 - [Configuration](/configuration)
 - [Examples](/examples)
+- [Development](/development)

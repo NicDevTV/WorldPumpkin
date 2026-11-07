@@ -24,6 +24,9 @@ Download the release artifact for the current package version.
 ::artifact-name
 ::
 
+Each release also has a `world_pumpkin.wasm.sha256` file. Verify the download with
+`sha256sum -c world_pumpkin.wasm.sha256`.
+
 ## Install
 
 1. Stop your Pumpkin server.
