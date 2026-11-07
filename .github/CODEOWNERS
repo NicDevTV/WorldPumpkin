@@ -1,0 +1,14 @@
+# Changes to anything that can alter the build, the release pipeline, the review
+# bot or the repository protection need an approval from the owner. Review bot
+# approvals do not count for these paths. GitHub does not accept the author's own
+# approval, so owner-authored changes to these paths merge through the admin bypass
+# inside a pull request.
+/.github/ @NicDevTV
+/.coderabbit.yaml @NicDevTV
+/SECURITY.md @NicDevTV
+/build.rs @NicDevTV
+/build/ @NicDevTV
+/tools/ @NicDevTV
+/Cargo.toml @NicDevTV
+/Cargo.lock @NicDevTV
+/rust-toolchain.toml @NicDevTV

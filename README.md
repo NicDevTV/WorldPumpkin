@@ -39,16 +39,17 @@ Run `/wp reload` after changing the config. `/wp status` shows queue status and 
 
 See the docs for [all commands](docs/content/commands.md) and [config options and permissions](docs/content/configuration.md).
 
-## Build versions
+## Build and release
 
-Local and CI builds use a version such as `0.1.0-dev.ge7bc7c2`. The base is the
-newer of the package version and the nearest version tag; the suffix identifies
-the Git commit. Without Git, the suffix is `dev.0`.
+Local and CI builds use a version such as `0.1.0-dev.ge7bc7c2`. The release
+profile is size-optimized (`opt-level = "z"`, LTO, stripped), giving a Wasm file
+of about 770 KiB.
 
-Run **Build Release** with a tag such as `v0.1.0`. The Rust version tool updates
-`Cargo.toml` and `Cargo.lock` in the workflow checkout, and the plugin is built
-as `0.1.0`. Prerelease tags such as `v0.2.0-rc.1` work too. Rerunning updates an
-existing draft's Wasm file and keeps its notes. Published releases are not replaced.
+Run **Actions, Build Release** with a tag such as `v0.1.0` (or `v0.2.0-rc.1` for
+a prerelease). It runs all checks, builds the Wasm file and creates a draft
+release with `world_pumpkin.wasm` and a `.sha256` file. Enable `publish` to
+publish it directly and redeploy the wiki. See the
+[development docs](docs/content/development.md) for details.
 
 ## License
 

@@ -1,0 +1,29 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+language: en-US
+reviews:
+  profile: chill
+  # Requests changes for blocking findings and approves once required threads are
+  # resolved, the latest commit is reviewed, pre-merge checks pass and the risk
+  # limits are met. Replaces the legacy request_changes_workflow key; set only one.
+  auto_approvals:
+    enabled: true
+    max_merge_risk: moderate
+    allow_author_approval: false
+    overrides:
+      # Release pipeline, repository protection and security policy changes need
+      # a stricter limit.
+      - paths:
+          - ".github/workflows/**"
+          - ".github/rulesets/**"
+          - ".github/CODEOWNERS"
+          - "SECURITY.md"
+        max_merge_risk: low
+  high_level_summary: true
+  poem: false
+  auto_review:
+    enabled: true
+    drafts: false
+  path_filters:
+    - "!docs/package-lock.json"
+    - "!Cargo.lock"
+    - "!tools/release-version/Cargo.lock"

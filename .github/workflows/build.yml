@@ -7,75 +7,163 @@ on:
         description: "Release tag, for example v0.1.0 or v0.2.0-rc.1"
         required: true
         type: string
+      publish:
+        description: "Publish after the build (needs approval of the release environment)"
+        required: false
+        default: false
+        type: boolean
 
 env:
   CARGO_TERM_COLOR: always
   PLUGIN_WASM: target/wasm32-wasip2/release/world_pumpkin.wasm
   ASSET_NAME: world_pumpkin.wasm
   RELEASE_TAG: ${{ inputs.tag }}
+  PUBLISH: ${{ inputs.publish }}
   WORLDPUMPKIN_RELEASE_BUILD: "true"
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: release-${{ inputs.tag }}
+  cancel-in-progress: false
 
 jobs:
   build:
     name: Build Draft Release
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      published: ${{ steps.state.outputs.published }}
+      exists: ${{ steps.state.outputs.exists }}
+      sha256: ${{ steps.bundle.outputs.sha256 }}
 
     steps:
       - name: Checkout WorldPumpkin
         uses: actions/checkout@v7
 
+      - name: Check release state
+        id: state
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          published=false
+          exists=false
+          if output=$(gh release view "$RELEASE_TAG" --json isDraft --jq '.isDraft' 2>&1); then
+            exists=true
+            if [[ "$output" != "true" ]]; then
+              published=true
+            fi
+          elif [[ "$output" != *"release not found"* ]]; then
+            echo "Could not look up release $RELEASE_TAG: $output"
+            exit 1
+          fi
+          echo "published=$published" >> "$GITHUB_OUTPUT"
+          echo "exists=$exists" >> "$GITHUB_OUTPUT"
+          if [[ "$published" == "true" ]]; then
+            if [[ "$PUBLISH" == "true" ]]; then
+              echo "Release $RELEASE_TAG is already published; only the wiki deploy is retried."
+              exit 0
+            fi
+            echo "Release $RELEASE_TAG is already published. Use a new tag."
+            exit 1
+          fi
+          # An existing tag must point at the commit being built.
+          tag_sha=$(git ls-remote origin "refs/tags/$RELEASE_TAG^{}" | cut -f1)
+          if [[ -z "$tag_sha" ]]; then
+            tag_sha=$(git ls-remote origin "refs/tags/$RELEASE_TAG" | cut -f1)
+          fi
+          if [[ -n "$tag_sha" && "$tag_sha" != "$GITHUB_SHA" ]]; then
+            echo "Tag $RELEASE_TAG points to $tag_sha, not $GITHUB_SHA. Use a new tag or run on the tagged commit."
+            exit 1
+          fi
+
       - name: Install Rust toolchain
+        if: ${{ steps.state.outputs.published != 'true' }}
         run: |
           rustup toolchain install stable --profile minimal --target wasm32-wasip2 --component rustfmt --component clippy
           rustup default stable
 
       - name: Cache Cargo
+        if: ${{ steps.state.outputs.published != 'true' }}
         uses: Swatinem/rust-cache@v2.9.3
 
       - name: Set version from release tag
+        if: ${{ steps.state.outputs.published != 'true' }}
         run: cargo run --quiet --locked --manifest-path tools/release-version/Cargo.toml --target-dir target -- "$RELEASE_TAG"
 
       - name: Test release version tooling
+        if: ${{ steps.state.outputs.published != 'true' }}
         run: cargo test --locked --manifest-path tools/release-version/Cargo.toml --target-dir target
 
       - name: Check formatting
+        if: ${{ steps.state.outputs.published != 'true' }}
         run: cargo fmt --all --check
 
       - name: Test
+        if: ${{ steps.state.outputs.published != 'true' }}
         run: cargo test --locked --lib
 
       - name: Lint
+        if: ${{ steps.state.outputs.published != 'true' }}
         run: cargo clippy --locked --target wasm32-wasip2 --all-targets -- -D warnings
 
       - name: Check Wasm build
+        if: ${{ steps.state.outputs.published != 'true' }}
         run: cargo check --locked --target wasm32-wasip2
 
       - name: Build release Wasm
+        if: ${{ steps.state.outputs.published != 'true' }}
         run: cargo build --locked --release --target wasm32-wasip2
 
       - name: Create release bundle
+        id: bundle
+        if: ${{ steps.state.outputs.published != 'true' }}
         run: |
           mkdir -p dist
           cp "$PLUGIN_WASM" "dist/$ASSET_NAME"
+          (cd dist && sha256sum "$ASSET_NAME" > "$ASSET_NAME.sha256")
+          hash=$(cut -d' ' -f1 "dist/$ASSET_NAME.sha256")
+          size=$(stat -c %s "dist/$ASSET_NAME")
+          echo "sha256=$hash" >> "$GITHUB_OUTPUT"
+          {
+            echo "### Release $RELEASE_TAG"
+            echo "- \`$ASSET_NAME\`: $size bytes ($((size / 1024)) KiB)"
+            echo "- sha256: \`$hash\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload bundle artifact
+        if: ${{ steps.state.outputs.published != 'true' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: world-pumpkin-release
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 14
 
       - name: Create or update draft release
+        if: ${{ steps.state.outputs.published != 'true' }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # Re-check right before attaching assets: an existing tag must still
+          # point at the built commit.
+          tag_sha=$(git ls-remote origin "refs/tags/$RELEASE_TAG^{}" | cut -f1)
+          if [[ -z "$tag_sha" ]]; then
+            tag_sha=$(git ls-remote origin "refs/tags/$RELEASE_TAG" | cut -f1)
+          fi
+          if [[ -n "$tag_sha" && "$tag_sha" != "$GITHUB_SHA" ]]; then
+            echo "Tag $RELEASE_TAG points to $tag_sha, not $GITHUB_SHA."
+            exit 1
+          fi
           prerelease=false
           if [[ "${RELEASE_TAG%%+*}" == *-* ]]; then
             prerelease=true
           fi
-          if existing=$(gh release view "$RELEASE_TAG" --json isDraft --jq '.isDraft'); then
-            if [[ "$existing" != "true" ]]; then
-              echo "Release $RELEASE_TAG is already published. Use a new tag."
-              exit 1
-            fi
+          if [[ "${{ steps.state.outputs.exists }}" == "true" ]]; then
             gh release edit "$RELEASE_TAG" --target "$GITHUB_SHA" --prerelease="$prerelease"
-            gh release upload "$RELEASE_TAG" "dist/$ASSET_NAME" --clobber
+            gh release upload "$RELEASE_TAG" "dist/$ASSET_NAME" "dist/$ASSET_NAME.sha256" --clobber
           else
             extra_flags=()
             if [[ "$prerelease" == "true" ]]; then
@@ -85,7 +173,71 @@ jobs:
               --draft \
               --target "$GITHUB_SHA" \
               --title "WorldPumpkin $RELEASE_TAG" \
-              --notes "Draft release for WorldPumpkin $RELEASE_TAG." \
+              --generate-notes \
               "${extra_flags[@]}" \
-              "dist/$ASSET_NAME"
+              "dist/$ASSET_NAME" "dist/$ASSET_NAME.sha256"
           fi
+
+  publish:
+    name: Publish Release
+    needs: build
+    if: ${{ inputs.publish }}
+    runs-on: ubuntu-latest
+    # Needs approval and only runs from the allowed branches of this environment.
+    environment:
+      name: release
+      url: ${{ github.server_url }}/${{ github.repository }}/releases/tag/${{ inputs.tag }}
+    permissions:
+      contents: write
+      actions: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      EXPECTED_SHA256: ${{ needs.build.outputs.sha256 }}
+      ALREADY_PUBLISHED: ${{ needs.build.outputs.published }}
+      DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+
+    steps:
+      - name: Verify draft assets
+        if: ${{ env.ALREADY_PUBLISHED != 'true' }}
+        run: |
+          release_id=$(gh api "repos/$GITHUB_REPOSITORY/releases" --paginate \
+            --jq ".[] | select(.tag_name == \"$RELEASE_TAG\" and .draft) | .id")
+          if [[ -z "$release_id" || "$release_id" == *$'\n'* ]]; then
+            echo "Expected exactly one draft for $RELEASE_TAG"
+            exit 1
+          fi
+          echo "RELEASE_ID=$release_id" >> "$GITHUB_ENV"
+          mkdir verify
+          for name in "$ASSET_NAME" "$ASSET_NAME.sha256"; do
+            asset_id=$(gh api "repos/$GITHUB_REPOSITORY/releases/$release_id/assets" --paginate \
+              --jq ".[] | select(.name == \"$name\") | .id")
+            [[ -n "$asset_id" ]] || { echo "Missing asset $name"; exit 1; }
+            gh api -H "Accept: application/octet-stream" \
+              "repos/$GITHUB_REPOSITORY/releases/assets/$asset_id" > "verify/$name"
+          done
+          (cd verify && sha256sum -c "$ASSET_NAME.sha256")
+          actual=$(sha256sum "verify/$ASSET_NAME" | cut -d' ' -f1)
+          if [[ "$actual" != "$EXPECTED_SHA256" ]]; then
+            echo "Draft Wasm ($actual) does not match the build output ($EXPECTED_SHA256)."
+            exit 1
+          fi
+          # An existing tag must still point at the built commit.
+          if tag_sha=$(gh api "repos/$GITHUB_REPOSITORY/commits/refs/tags/$RELEASE_TAG" --jq .sha 2>/dev/null); then
+            if [[ "$tag_sha" != "$GITHUB_SHA" ]]; then
+              echo "Tag $RELEASE_TAG points to $tag_sha, not $GITHUB_SHA."
+              exit 1
+            fi
+          fi
+
+      - name: Publish release
+        if: ${{ env.ALREADY_PUBLISHED != 'true' }}
+        run: |
+          gh api -X PATCH "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" -F draft=false
+          tag_sha=$(gh api "repos/$GITHUB_REPOSITORY/commits/refs/tags/$RELEASE_TAG" --jq .sha)
+          if [[ "$tag_sha" != "$GITHUB_SHA" ]]; then
+            echo "Published tag $RELEASE_TAG points to $tag_sha, not $GITHUB_SHA."
+            exit 1
+          fi
+
+      - name: Deploy wiki
+        run: gh workflow run docs.yml --repo "$GITHUB_REPOSITORY" --ref "$DEFAULT_BRANCH"

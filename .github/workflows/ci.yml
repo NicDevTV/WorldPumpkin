@@ -4,11 +4,14 @@ on:
   push:
     branches:
       - main
-    paths-ignore:
-      - "docs/**"
   pull_request:
-    paths-ignore:
-      - "docs/**"
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
 
 env:
   CARGO_TERM_COLOR: always
@@ -21,6 +24,8 @@ jobs:
     steps:
       - name: Checkout WorldPumpkin
         uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
 
       - name: Install Rust toolchain
         run: |
@@ -50,6 +55,11 @@ jobs:
 
       - name: Build release Wasm
         run: cargo build --locked --release --target wasm32-wasip2
+
+      - name: Report Wasm size
+        run: |
+          size=$(stat -c %s target/wasm32-wasip2/release/world_pumpkin.wasm)
+          echo "Wasm size: $size bytes ($((size / 1024)) KiB)" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload plugin artifact
         uses: actions/upload-artifact@v7
