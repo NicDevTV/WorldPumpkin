@@ -36,6 +36,7 @@ jobs:
       contents: write
     outputs:
       published: ${{ steps.state.outputs.published }}
+      exists: ${{ steps.state.outputs.exists }}
       sha256: ${{ steps.bundle.outputs.sha256 }}
 
     steps:
@@ -48,12 +49,18 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           published=false
-          if existing=$(gh release view "$RELEASE_TAG" --json isDraft --jq '.isDraft'); then
-            if [[ "$existing" != "true" ]]; then
+          exists=false
+          if output=$(gh release view "$RELEASE_TAG" --json isDraft --jq '.isDraft' 2>&1); then
+            exists=true
+            if [[ "$output" != "true" ]]; then
               published=true
             fi
+          elif [[ "$output" != *"release not found"* ]]; then
+            echo "Could not look up release $RELEASE_TAG: $output"
+            exit 1
           fi
           echo "published=$published" >> "$GITHUB_OUTPUT"
+          echo "exists=$exists" >> "$GITHUB_OUTPUT"
           if [[ "$published" == "true" ]]; then
             if [[ "$PUBLISH" == "true" ]]; then
               echo "Release $RELEASE_TAG is already published; only the wiki deploy is retried."
@@ -144,7 +151,7 @@ jobs:
           if [[ "${RELEASE_TAG%%+*}" == *-* ]]; then
             prerelease=true
           fi
-          if gh release view "$RELEASE_TAG" --json isDraft >/dev/null 2>&1; then
+          if [[ "${{ steps.state.outputs.exists }}" == "true" ]]; then
             gh release edit "$RELEASE_TAG" --target "$GITHUB_SHA" --prerelease="$prerelease"
             gh release upload "$RELEASE_TAG" "dist/$ASSET_NAME" "dist/$ASSET_NAME.sha256" --clobber
           else
@@ -177,6 +184,7 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       EXPECTED_SHA256: ${{ needs.build.outputs.sha256 }}
       ALREADY_PUBLISHED: ${{ needs.build.outputs.published }}
+      DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
 
     steps:
       - name: Verify draft assets
@@ -203,10 +211,23 @@ jobs:
             echo "Draft Wasm ($actual) does not match the build output ($EXPECTED_SHA256)."
             exit 1
           fi
+          # An existing tag must still point at the built commit.
+          if tag_sha=$(gh api "repos/$GITHUB_REPOSITORY/commits/refs/tags/$RELEASE_TAG" --jq .sha 2>/dev/null); then
+            if [[ "$tag_sha" != "$GITHUB_SHA" ]]; then
+              echo "Tag $RELEASE_TAG points to $tag_sha, not $GITHUB_SHA."
+              exit 1
+            fi
+          fi
 
       - name: Publish release
         if: ${{ env.ALREADY_PUBLISHED != 'true' }}
-        run: gh api -X PATCH "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" -F draft=false
+        run: |
+          gh api -X PATCH "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" -F draft=false
+          tag_sha=$(gh api "repos/$GITHUB_REPOSITORY/commits/refs/tags/$RELEASE_TAG" --jq .sha)
+          if [[ "$tag_sha" != "$GITHUB_SHA" ]]; then
+            echo "Published tag $RELEASE_TAG points to $tag_sha, not $GITHUB_SHA."
+            exit 1
+          fi
 
       - name: Deploy wiki
-        run: gh workflow run docs.yml --repo "$GITHUB_REPOSITORY" --ref "${{ github.event.repository.default_branch }}"
+        run: gh workflow run docs.yml --repo "$GITHUB_REPOSITORY" --ref "$DEFAULT_BRANCH"

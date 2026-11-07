@@ -14,6 +14,7 @@ Use a rustup-managed Cargo with the toolchain from
 `wasm32-wasip2` target apply before running these commands.
 
 ```bash
+rustup component add rustfmt clippy
 cargo test --locked --lib
 cargo clippy --locked --target wasm32-wasip2 --all-targets -- -D warnings
 cargo build --locked --release --target wasm32-wasip2
@@ -80,6 +81,10 @@ Import ruleset).
 - **Protect main:** changes need a pull request with one approval, a passing `Rust` check, squash
   merges only, linear history, no force pushes or deletion. Admins cannot push
   directly; they can only bypass the checks inside a pull request.
+  Paths that can change the build or the protection itself (`.github/`,
+  `.coderabbit.yaml`, `SECURITY.md`, `build.rs`, `build/`, `tools/`) are listed in
+  `CODEOWNERS` and need the owner's approval; a review bot approval does not
+  count for them. This stops a pull request from loosening its own review rules.
 - **Protect release tags:** `v*` tags cannot be moved or deleted. Creating them is
   allowed so the release workflow can tag.
 
