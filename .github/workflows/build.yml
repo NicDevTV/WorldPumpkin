@@ -7,6 +7,11 @@ on:
         description: "Release tag, for example v0.1.0 or v0.2.0-rc.1"
         required: true
         type: string
+      publish:
+        description: "Publish immediately instead of leaving a draft"
+        required: false
+        default: false
+        type: boolean
 
 env:
   CARGO_TERM_COLOR: always
@@ -17,6 +22,11 @@ env:
 
 permissions:
   contents: write
+  actions: write
+
+concurrency:
+  group: release-${{ inputs.tag }}
+  cancel-in-progress: false
 
 jobs:
   build:
@@ -60,6 +70,21 @@ jobs:
         run: |
           mkdir -p dist
           cp "$PLUGIN_WASM" "dist/$ASSET_NAME"
+          (cd dist && sha256sum "$ASSET_NAME" > "$ASSET_NAME.sha256")
+          size=$(stat -c %s "dist/$ASSET_NAME")
+          {
+            echo "### Release $RELEASE_TAG"
+            echo "- \`$ASSET_NAME\`: $size bytes ($((size / 1024)) KiB)"
+            echo "- sha256: \`$(cut -d' ' -f1 "dist/$ASSET_NAME.sha256")\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload bundle artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: world-pumpkin-release
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 14
 
       - name: Create or update draft release
         env:
@@ -75,7 +100,7 @@ jobs:
               exit 1
             fi
             gh release edit "$RELEASE_TAG" --target "$GITHUB_SHA" --prerelease="$prerelease"
-            gh release upload "$RELEASE_TAG" "dist/$ASSET_NAME" --clobber
+            gh release upload "$RELEASE_TAG" "dist/$ASSET_NAME" "dist/$ASSET_NAME.sha256" --clobber
           else
             extra_flags=()
             if [[ "$prerelease" == "true" ]]; then
@@ -85,7 +110,15 @@ jobs:
               --draft \
               --target "$GITHUB_SHA" \
               --title "WorldPumpkin $RELEASE_TAG" \
-              --notes "Draft release for WorldPumpkin $RELEASE_TAG." \
+              --generate-notes \
               "${extra_flags[@]}" \
-              "dist/$ASSET_NAME"
+              "dist/$ASSET_NAME" "dist/$ASSET_NAME.sha256"
           fi
+
+      - name: Publish release
+        if: ${{ inputs.publish }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release edit "$RELEASE_TAG" --draft=false
+          gh workflow run docs.yml --ref "${GITHUB_REF_NAME}"
