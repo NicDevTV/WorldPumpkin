@@ -12,10 +12,10 @@
     "preview": "nuxt preview"
   },
   "dependencies": {
-    "@nuxt/content": "^3.16.1",
+    "@nuxt/content": "^3.16.2",
     "better-sqlite3": "^13.0.3",
-    "nuxt": "^4.6.2",
-    "vue": "^3.5.43"
+    "nuxt": "^4.6.4",
+    "vue": "^3.5.45"
   },
   "devDependencies": {
     "typescript": "^7.0.2"
