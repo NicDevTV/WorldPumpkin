@@ -31,7 +31,7 @@ update_notify_on_join = true
 | `max_blocks_per_operation` | `250000` | Maximum size of a single edit for normal players. |
 | `blocks_per_tick` | `8192` | Number of blocks processed per server tick. |
 | `max_queued_operations` | `4` | Maximum number of queued edits. |
-| `max_queued_blocks` | `1000000` | Maximum total blocks waiting in the edit queue. |
+| `max_queued_blocks` | `1000000` | Maximum queued block reservation. Moves reserve twice their selection size until completion, to account for source and destination. |
 | `max_history_entries` | `15` | Maximum undo entries kept per player. |
 | `max_history_blocks` | `500000` | Maximum number of history blocks kept per player. |
 | `fast_mode` | `true` | Uses direct chunk writes and disables physics side effects where possible. |

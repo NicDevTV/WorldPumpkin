@@ -54,7 +54,11 @@ pub(super) fn handle_player(
 
     let config = state.lock().unwrap().config().clone();
     let mut queue_guard = queue.lock().unwrap();
-    queue_guard.can_enqueue(cuboid.volume(), &config)?;
+    let reservation = cuboid
+        .volume()
+        .checked_mul(2)
+        .ok_or_else(|| "Move is too large for the edit queue.".to_owned())?;
+    queue_guard.can_enqueue(reservation, &config)?;
     queue_guard.enqueue(EditOperation::move_blocks(
         owner,
         world,

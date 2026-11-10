@@ -57,6 +57,18 @@ impl PluginState {
             .map(|session| session.selection)
     }
 
+    /// Clears only the selection in the requested world, leaving history untouched.
+    pub fn clear_selection(&mut self, owner: &str, world_id: &str) -> bool {
+        let Some(session) = self.sessions.get_mut(owner) else {
+            return false;
+        };
+        if session.selection_world != world_id || session.selection == Selection::default() {
+            return false;
+        }
+        session.selection = Selection::default();
+        true
+    }
+
     pub fn push_undo_history(&mut self, owner: String, entry: HistoryEntry) {
         let session = self.sessions.entry(owner).or_default();
         session.redo_history.clear();
@@ -219,5 +231,22 @@ mod tests {
         assert!(selection.pos1.is_none());
         assert_eq!(selection.pos2, Some(pos));
         assert!(state.selection("player", "overworld").is_none());
+    }
+
+    #[test]
+    fn clear_selection_is_scoped_to_player_and_world() {
+        let mut state = PluginState::new(Config::default());
+        let pos = BlockPos { x: 1, y: 2, z: 3 };
+        state.set_position("alice".into(), "world".into(), SelectionSlot::Pos1, pos);
+        state.set_position("bob".into(), "world".into(), SelectionSlot::Pos1, pos);
+        assert!(!state.clear_selection("alice", "other"));
+        assert!(!state.clear_selection("unknown", "world"));
+        assert!(state.clear_selection("alice", "world"));
+        assert_eq!(
+            state.selection("alice", "world"),
+            Some(Selection::default())
+        );
+        assert_eq!(state.selection("bob", "world").unwrap().pos1, Some(pos));
+        assert!(!state.clear_selection("alice", "world"));
     }
 }

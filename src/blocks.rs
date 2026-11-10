@@ -23,6 +23,9 @@ struct WeightedBlock {
 impl BlockPattern {
     /// Chooses a state by weight, deterministically for the given position and edit seed.
     pub(crate) fn choose(&self, pos: BlockPos, seed: u64) -> u16 {
+        if let [choice] = self.choices.as_slice() {
+            return choice.state;
+        }
         let mut cursor = position_hash(pos, seed) % u64::from(self.total_weight);
         for choice in &self.choices {
             if cursor < u64::from(choice.weight) {
@@ -387,12 +390,25 @@ mod tests {
         }
     }
 
-    /// Checks that an unweighted single-block pattern selects its only state.
+    /// A single choice must ignore position and seed, even with an explicit weight.
     #[test]
     fn single_block_patterns_keep_the_same_state() {
-        let pattern = resolve_pattern("stone", &Registry).unwrap();
-        assert_eq!(pattern.total_weight, 1);
-        assert_eq!(pattern.choose(BlockPos { x: 0, y: 0, z: 0 }, 1), 1);
+        for input in ["stone", "37%stone"] {
+            let pattern = resolve_pattern(input, &Registry).unwrap();
+            for (pos, seed) in [
+                (BlockPos { x: 0, y: 0, z: 0 }, 1),
+                (
+                    BlockPos {
+                        x: i32::MIN,
+                        y: i32::MAX,
+                        z: -1,
+                    },
+                    u64::MAX,
+                ),
+            ] {
+                assert_eq!(pattern.choose(pos, seed), 1);
+            }
+        }
     }
 
     /// Checks that token detection preserves weights, namespaces, and property commas.

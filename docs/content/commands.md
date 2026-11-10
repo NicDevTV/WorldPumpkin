@@ -24,6 +24,10 @@ WorldPumpkin supports selection, edit, history, and administration commands.
 | `//expand <amount> <direction>` | Expand in a specific direction. |
 | `//expand <amount> <reverseAmount> <direction>` | Expand in both directions on one axis. |
 | `//expand vert` | Expand from world minimum height to world maximum height. |
+| `//shift <amount> [direction]` | Move the selection without moving blocks. |
+| `//contract <amount> [reverseAmount] [direction]` | Shrink the selection along one or both sides of an axis. |
+| `//size` | Show the selection dimensions and number of blocks. |
+| `//desel`, `//deselect` | Clear your current world's selection. |
 
 Directions are `north`, `south`, `east`, `west`, `up`, and `down`. Short forms are `n`, `s`, `e`, `w`, `u`, and `d`.
 
