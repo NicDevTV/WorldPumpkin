@@ -9,8 +9,8 @@ navigation:
 
 WorldPumpkin builds to a WebAssembly plugin file for Pumpkin.
 
-The current source targets Pumpkin `0.2.0+26.3-26.51` at revision
-`742beaf6f9f84fb99a04402434f6c6feb86667d1`. Use a server with a compatible
+The current source targets Pumpkin `0.2.2+26.3-26.60` at revision
+`10f1fde9367c827f168eaabdc8f343b1ce6f676c`. Use a server with a compatible
 plugin API. Block names and state IDs are resolved from the running server.
 Check the compatibility notes for the release you download.
 

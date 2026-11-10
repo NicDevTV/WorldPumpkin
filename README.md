@@ -10,7 +10,7 @@ Edits run through a queue with configurable limits and a block budget per tick.
 2. Stop the server and copy the file into its plugin folder.
 3. Start the server and run `/wp info`.
 
-The plugin is built against Pumpkin revision `742beaf6f9f84fb99a04402434f6c6feb86667d1` (0.2.0+26.3-26.51). Use a server with a compatible plugin API. Block names and IDs come from the running server.
+The plugin is built against Pumpkin revision `10f1fde9367c827f168eaabdc8f343b1ce6f676c` (0.2.2+26.3-26.60). Use a server with a compatible plugin API. Block names and IDs come from the running server.
 
 ## Use
 
@@ -26,6 +26,7 @@ Stand at one corner and run `//pos1`, then at the opposite corner and run `//pos
 ```
 
 Use `//hpos1` and `//hpos2` to select the blocks you are looking at. `//chunk` selects your current chunk; `//expand` extends the selection.
+Use `//size` to inspect the selection dimensions and `//desel` to clear it.
 
 Block patterns also work: `//set 50%stone,50%dirt`. Properties can be combined, for example `//set oak_stairs[facing=north,half=top]`.
 

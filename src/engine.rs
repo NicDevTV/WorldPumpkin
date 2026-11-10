@@ -14,14 +14,14 @@ use std::{
 mod geometry;
 mod writer;
 
-use geometry::CuboidIter;
 pub use geometry::{BlockPos, Cuboid, Selection};
+use geometry::{CuboidIter, WallIter};
 use writer::{apply_forward, replay_change, ChunkCursor, WorldAccess, WriteStrategy};
 
 // Patterns are deterministic inside one edit, but each queued edit gets a fresh distribution.
 static PATTERN_SEED: AtomicU64 = AtomicU64::new(1);
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct HistoryEntry {
     world_id: String,
     changes: Vec<BlockChange>,
@@ -41,7 +41,7 @@ impl HistoryEntry {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct BlockChange {
     pos: BlockPos,
     old_state: u16,
@@ -171,14 +171,13 @@ impl EditOperation {
         state: Arc<Mutex<PluginState>>,
     ) -> Self {
         let world_id = world.get_id();
-        let positions = cuboid.wall_positions();
-        let remaining = positions.len() as u64;
+        let remaining = cuboid.wall_volume();
         Self {
             owner,
             world,
             world_id,
             kind: EditKind::Set { to: Arc::new(to) },
-            positions: EditPositions::vec(positions),
+            positions: EditPositions::Walls(cuboid.walls()),
             history: Vec::new(),
             state,
             remaining,
@@ -315,28 +314,24 @@ impl EditOperation {
         }
     }
 
-    fn finish(&mut self) {
-        match &self.kind {
+    fn finish(self) {
+        match self.kind {
             EditKind::Set { .. } | EditKind::Replace { .. } | EditKind::Move(_) => {
-                let history =
-                    HistoryEntry::new(self.world_id.clone(), std::mem::take(&mut self.history));
+                let history = HistoryEntry::new(self.world_id, self.history);
                 if history.len() > 0 {
                     self.state
                         .lock()
                         .unwrap()
-                        .push_undo_history(self.owner.clone(), history);
+                        .push_undo_history(self.owner, history);
                 }
             }
             EditKind::Replay {
                 history, direction, ..
             } => {
-                let history = history.clone();
                 let mut state = self.state.lock().unwrap();
                 match direction {
-                    ReplayDirection::Undo => state.push_redo_history(self.owner.clone(), history),
-                    ReplayDirection::Redo => {
-                        state.push_replayed_undo_history(self.owner.clone(), history)
-                    }
+                    ReplayDirection::Undo => state.push_redo_history(self.owner, history),
+                    ReplayDirection::Redo => state.push_replayed_undo_history(self.owner, history),
                 }
             }
         }
@@ -379,16 +374,13 @@ impl EditOperation {
 
 enum EditPositions {
     Cuboid(CuboidIter),
+    Walls(WallIter),
     Vec(std::vec::IntoIter<BlockPos>),
 }
 
 impl EditPositions {
     fn cuboid(cuboid: Cuboid) -> Self {
         Self::Cuboid(cuboid.iter())
-    }
-
-    fn vec(positions: Vec<BlockPos>) -> Self {
-        Self::Vec(positions.into_iter())
     }
 
     fn empty() -> Self {
@@ -402,6 +394,7 @@ impl Iterator for EditPositions {
     fn next(&mut self) -> Option<Self::Item> {
         match self {
             Self::Cuboid(iter) => iter.next(),
+            Self::Walls(iter) => iter.next(),
             Self::Vec(iter) => iter.next(),
         }
     }
@@ -464,7 +457,7 @@ impl EditQueue {
         let result = operation.process(budget, config);
         self.queued_blocks = self.queued_blocks.saturating_sub(result.scanned());
         if result.is_finished() {
-            if let Some(mut operation) = self.queue.pop_front() {
+            if let Some(operation) = self.queue.pop_front() {
                 operation.finish();
             }
         }
