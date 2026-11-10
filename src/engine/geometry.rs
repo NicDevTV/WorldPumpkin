@@ -19,6 +19,14 @@ impl BlockPos {
             z: self.z.checked_add(offset.z)?,
         })
     }
+
+    pub(super) fn checked_sub(self, offset: Self) -> Option<Self> {
+        Some(Self {
+            x: self.x.checked_sub(offset.x)?,
+            y: self.y.checked_sub(offset.y)?,
+            z: self.z.checked_sub(offset.z)?,
+        })
+    }
 }
 
 impl From<WitBlockPos> for BlockPos {
@@ -63,6 +71,14 @@ pub struct Cuboid {
 }
 
 impl Cuboid {
+    pub(super) fn contains(self, pos: BlockPos) -> bool {
+        pos.x >= self.min.x
+            && pos.x <= self.max.x
+            && pos.y >= self.min.y
+            && pos.y <= self.max.y
+            && pos.z >= self.min.z
+            && pos.z <= self.max.z
+    }
     /// Normalizes two corners into an inclusive cuboid with ordered bounds on every axis.
     pub fn new(a: BlockPos, b: BlockPos) -> Self {
         Self {
