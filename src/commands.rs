@@ -7,6 +7,7 @@ mod move_command;
 mod pos;
 mod replace;
 mod selection;
+mod selection_transform;
 mod set;
 mod suggestions;
 mod walls;
@@ -44,6 +45,7 @@ pub fn register(context: &Context, state: Arc<Mutex<PluginState>>, queue: Arc<Mu
     pos::register(context, Arc::clone(&state), SelectionSlot::Pos2);
     selection::register_chunk(context, Arc::clone(&state));
     selection::register_expand(context, Arc::clone(&state));
+    selection_transform::register(context, Arc::clone(&state));
     inspection::register(context, Arc::clone(&state));
     selection::register_hpos(context, Arc::clone(&state), SelectionSlot::Pos1);
     selection::register_hpos(context, Arc::clone(&state), SelectionSlot::Pos2);
@@ -105,6 +107,8 @@ fn is_worldpumpkin_command(command: &str) -> bool {
                 | "hpos2"
                 | "chunk"
                 | "expand"
+                | "shift"
+                | "contract"
                 | "size"
                 | "desel"
                 | "deselect"
@@ -158,6 +162,11 @@ fn handle_double_slash_command(
             require_player_permission(player, PERM_POS)?;
             let args = parts.collect::<Vec<_>>().join(" ");
             selection::handle_player_expand(player, state, &args)
+        }
+        Some(action @ ("shift" | "contract")) => {
+            require_player_permission(player, PERM_POS)?;
+            let args = parts.collect::<Vec<_>>().join(" ");
+            selection_transform::handle_player(player, state, action, &args)
         }
         Some("size") => {
             require_player_permission(player, PERM_POS)?;

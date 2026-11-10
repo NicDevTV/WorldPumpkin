@@ -12,7 +12,7 @@ pub struct BlockPos {
 
 impl BlockPos {
     /// Adds an offset to each coordinate, returning `None` if any coordinate overflows.
-    pub(super) fn checked_offset(self, offset: Self) -> Option<Self> {
+    pub(crate) fn checked_offset(self, offset: Self) -> Option<Self> {
         Some(Self {
             x: self.x.checked_add(offset.x)?,
             y: self.y.checked_add(offset.y)?,
