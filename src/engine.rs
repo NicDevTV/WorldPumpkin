@@ -4,7 +4,7 @@
 use crate::{blocks::BlockPattern, config::Config, state::PluginState};
 use pumpkin_plugin_api::{server::Server, world::World};
 use std::{
-    collections::{HashMap, HashSet, VecDeque},
+    collections::VecDeque,
     sync::{
         atomic::{AtomicU64, Ordering},
         Arc, Mutex,
@@ -12,16 +12,18 @@ use std::{
 };
 
 mod geometry;
+mod move_edit;
 mod writer;
 
-use geometry::CuboidIter;
 pub use geometry::{BlockPos, Cuboid, Selection};
+use geometry::{CuboidIter, WallIter};
+use move_edit::MoveState;
 use writer::{apply_forward, replay_change, ChunkCursor, WorldAccess, WriteStrategy};
 
 // Patterns are deterministic inside one edit, but each queued edit gets a fresh distribution.
 static PATTERN_SEED: AtomicU64 = AtomicU64::new(1);
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct HistoryEntry {
     world_id: String,
     changes: Vec<BlockChange>,
@@ -41,7 +43,7 @@ impl HistoryEntry {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct BlockChange {
     pos: BlockPos,
     old_state: u16,
@@ -54,26 +56,6 @@ pub struct BlockChange {
 struct BlockSnapshot {
     state: u16,
     block_entity: Option<Vec<u8>>,
-}
-
-struct MoveState {
-    positions: Vec<BlockPos>,
-    offset: BlockPos,
-    snapshots: HashMap<BlockPos, BlockSnapshot>,
-    cells: Vec<MoveCell>,
-    phase: MovePhase,
-    next_index: usize,
-}
-
-struct MoveCell {
-    pos: BlockPos,
-    old: BlockSnapshot,
-    new: BlockSnapshot,
-}
-
-enum MovePhase {
-    Snapshot,
-    Apply,
 }
 
 enum EditKind {
@@ -171,14 +153,13 @@ impl EditOperation {
         state: Arc<Mutex<PluginState>>,
     ) -> Self {
         let world_id = world.get_id();
-        let positions = cuboid.wall_positions();
-        let remaining = positions.len() as u64;
+        let remaining = cuboid.wall_volume();
         Self {
             owner,
             world,
             world_id,
             kind: EditKind::Set { to: Arc::new(to) },
-            positions: EditPositions::vec(positions),
+            positions: EditPositions::Walls(cuboid.walls()),
             history: Vec::new(),
             state,
             remaining,
@@ -195,23 +176,16 @@ impl EditOperation {
         state: Arc<Mutex<PluginState>>,
     ) -> Self {
         let world_id = world.get_id();
-        let positions: Vec<_> = cuboid.iter().collect();
+        let reserved_blocks = cuboid.volume().saturating_mul(2);
         Self {
             owner,
             world,
             world_id,
-            kind: EditKind::Move(MoveState {
-                snapshots: HashMap::with_capacity(positions.len().saturating_mul(2)),
-                positions,
-                offset,
-                cells: Vec::new(),
-                phase: MovePhase::Snapshot,
-                next_index: 0,
-            }),
+            kind: EditKind::Move(MoveState::new(cuboid, offset)),
             positions: EditPositions::empty(),
             history: Vec::new(),
             state,
-            remaining: cuboid.volume(),
+            remaining: reserved_blocks,
             chunk_cursor: None,
             pattern_seed: 0,
         }
@@ -251,16 +225,7 @@ impl EditOperation {
     fn pending_blocks(&self) -> u64 {
         match &self.kind {
             EditKind::Set { .. } | EditKind::Replace { .. } => self.remaining,
-            EditKind::Move(move_state) => match move_state.phase {
-                MovePhase::Snapshot => move_state
-                    .positions
-                    .len()
-                    .saturating_sub(move_state.next_index)
-                    as u64,
-                MovePhase::Apply => {
-                    move_state.cells.len().saturating_sub(move_state.next_index) as u64
-                }
-            },
+            EditKind::Move(_) => self.remaining,
             EditKind::Replay {
                 history,
                 direction,
@@ -292,14 +257,12 @@ impl EditOperation {
         }
 
         if let EditKind::Move(move_state) = &mut self.kind {
-            return process_move(
-                &self.world,
-                &mut self.chunk_cursor,
+            let mut access = WorldAccess::new(&self.world, &mut self.chunk_cursor, &writer);
+            return move_state.process(
+                &mut access,
                 &mut self.history,
-                move_state,
                 budget,
-                config,
-                &writer,
+                config.max_history_blocks,
             );
         }
 
@@ -315,28 +278,24 @@ impl EditOperation {
         }
     }
 
-    fn finish(&mut self) {
-        match &self.kind {
+    fn finish(self) {
+        match self.kind {
             EditKind::Set { .. } | EditKind::Replace { .. } | EditKind::Move(_) => {
-                let history =
-                    HistoryEntry::new(self.world_id.clone(), std::mem::take(&mut self.history));
+                let history = HistoryEntry::new(self.world_id, self.history);
                 if history.len() > 0 {
                     self.state
                         .lock()
                         .unwrap()
-                        .push_undo_history(self.owner.clone(), history);
+                        .push_undo_history(self.owner, history);
                 }
             }
             EditKind::Replay {
                 history, direction, ..
             } => {
-                let history = history.clone();
                 let mut state = self.state.lock().unwrap();
                 match direction {
-                    ReplayDirection::Undo => state.push_redo_history(self.owner.clone(), history),
-                    ReplayDirection::Redo => {
-                        state.push_replayed_undo_history(self.owner.clone(), history)
-                    }
+                    ReplayDirection::Undo => state.push_redo_history(self.owner, history),
+                    ReplayDirection::Redo => state.push_replayed_undo_history(self.owner, history),
                 }
             }
         }
@@ -379,16 +338,13 @@ impl EditOperation {
 
 enum EditPositions {
     Cuboid(CuboidIter),
+    Walls(WallIter),
     Vec(std::vec::IntoIter<BlockPos>),
 }
 
 impl EditPositions {
     fn cuboid(cuboid: Cuboid) -> Self {
         Self::Cuboid(cuboid.iter())
-    }
-
-    fn vec(positions: Vec<BlockPos>) -> Self {
-        Self::Vec(positions.into_iter())
     }
 
     fn empty() -> Self {
@@ -402,6 +358,7 @@ impl Iterator for EditPositions {
     fn next(&mut self) -> Option<Self::Item> {
         match self {
             Self::Cuboid(iter) => iter.next(),
+            Self::Walls(iter) => iter.next(),
             Self::Vec(iter) => iter.next(),
         }
     }
@@ -462,9 +419,14 @@ impl EditQueue {
         };
 
         let result = operation.process(budget, config);
-        self.queued_blocks = self.queued_blocks.saturating_sub(result.scanned());
+        let released = released_reservation(
+            matches!(operation.kind, EditKind::Move(_)),
+            operation.pending_blocks(),
+            &result,
+        );
+        self.queued_blocks = self.queued_blocks.saturating_sub(released);
         if result.is_finished() {
-            if let Some(mut operation) = self.queue.pop_front() {
+            if let Some(operation) = self.queue.pop_front() {
                 operation.finish();
             }
         }
@@ -476,131 +438,16 @@ enum ProcessResult {
     Finished { scanned: usize },
 }
 
-fn process_move(
-    world: &World,
-    chunk_cursor: &mut Option<ChunkCursor>,
-    history: &mut Vec<BlockChange>,
-    move_state: &mut MoveState,
-    budget: usize,
-    config: &Config,
-    writer: &WriteStrategy,
-) -> ProcessResult {
-    match move_state.phase {
-        MovePhase::Snapshot => {
-            let start = move_state.next_index;
-            let end = (start + budget).min(move_state.positions.len());
-            for index in start..end {
-                let source = move_state.positions[index];
-                let target = source.checked_offset(move_state.offset).unwrap_or(source);
-                snapshot_block(world, chunk_cursor, move_state, writer, source);
-                snapshot_block(world, chunk_cursor, move_state, writer, target);
-            }
-            move_state.next_index = end;
-            if end < move_state.positions.len() {
-                return ProcessResult::Pending {
-                    scanned: end - start,
-                };
-            }
-
-            move_state.cells = build_move_cells(move_state);
-            move_state.phase = MovePhase::Apply;
-            move_state.next_index = 0;
-            if move_state.cells.is_empty() {
-                return ProcessResult::Finished {
-                    scanned: end - start,
-                };
-            }
-            ProcessResult::Pending {
-                scanned: end - start,
-            }
+fn released_reservation(is_move: bool, reserved: u64, result: &ProcessResult) -> u64 {
+    if is_move {
+        if result.is_finished() {
+            reserved
+        } else {
+            0
         }
-        MovePhase::Apply => {
-            let start = move_state.next_index;
-            let end = (start + budget).min(move_state.cells.len());
-            for cell in &move_state.cells[start..end] {
-                writer.set_block_state_with_entity_callbacks(world, cell.pos, cell.new.state);
-                writer.set_block_entity(world, cell.pos, cell.new.block_entity.as_deref());
-                if history.len() < config.max_history_blocks {
-                    history.push(BlockChange {
-                        pos: cell.pos,
-                        old_state: cell.old.state,
-                        new_state: cell.new.state,
-                        old_block_entity: cell.old.block_entity.clone(),
-                        new_block_entity: cell.new.block_entity.clone(),
-                    });
-                }
-            }
-            move_state.next_index = end;
-            if end == move_state.cells.len() {
-                ProcessResult::Finished {
-                    scanned: end - start,
-                }
-            } else {
-                ProcessResult::Pending {
-                    scanned: end - start,
-                }
-            }
-        }
+    } else {
+        result.scanned()
     }
-}
-
-fn snapshot_block(
-    world: &World,
-    chunk_cursor: &mut Option<ChunkCursor>,
-    move_state: &mut MoveState,
-    writer: &WriteStrategy,
-    pos: BlockPos,
-) {
-    if move_state.snapshots.contains_key(&pos) {
-        return;
-    }
-    move_state.snapshots.insert(
-        pos,
-        BlockSnapshot {
-            state: writer.get_block_state_id(world, chunk_cursor, pos),
-            block_entity: world.get_block_entity_nbt(pos.into()),
-        },
-    );
-}
-
-fn build_move_cells(move_state: &MoveState) -> Vec<MoveCell> {
-    let mut after = HashMap::with_capacity(move_state.snapshots.len());
-    let mut affected = Vec::with_capacity(move_state.snapshots.len());
-    let mut seen = HashSet::with_capacity(move_state.snapshots.len());
-
-    for source in &move_state.positions {
-        let target = source.checked_offset(move_state.offset).unwrap_or(*source);
-        if seen.insert(*source) {
-            affected.push(*source);
-        }
-        if seen.insert(target) {
-            affected.push(target);
-        }
-        if let Some(snapshot) = move_state.snapshots.get(source) {
-            after.insert(target, snapshot.clone());
-        }
-    }
-
-    for source in &move_state.positions {
-        if !after.contains_key(source) {
-            after.insert(
-                *source,
-                BlockSnapshot {
-                    state: 0,
-                    block_entity: None,
-                },
-            );
-        }
-    }
-
-    affected
-        .into_iter()
-        .filter_map(|pos| {
-            let old = move_state.snapshots.get(&pos)?.clone();
-            let new = after.get(&pos)?.clone();
-            (old != new).then_some(MoveCell { pos, old, new })
-        })
-        .collect()
 }
 
 impl ProcessResult {
@@ -675,14 +522,30 @@ pub(super) fn position_hash(pos: BlockPos, seed: u64) -> u64 {
 
 #[cfg(test)]
 mod tests {
-    use super::{build_move_cells, BlockPos, BlockSnapshot, Cuboid, MovePhase, MoveState};
-    use std::collections::{HashMap, HashSet};
+    use super::{released_reservation, BlockPos, Cuboid, ProcessResult};
+    use std::collections::HashSet;
 
     #[test]
     fn cuboid_normalizes_and_counts_volume() {
         let cuboid = Cuboid::new(BlockPos { x: 2, y: 4, z: 6 }, BlockPos { x: 1, y: 3, z: 5 });
 
         assert_eq!(cuboid.volume(), 8);
+    }
+
+    #[test]
+    fn move_reservation_is_held_until_the_entire_move_finishes() {
+        assert_eq!(
+            released_reservation(true, 100, &ProcessResult::Pending { scanned: 40 }),
+            0
+        );
+        assert_eq!(
+            released_reservation(true, 100, &ProcessResult::Finished { scanned: 7 }),
+            100
+        );
+        assert_eq!(
+            released_reservation(false, 100, &ProcessResult::Pending { scanned: 40 }),
+            40
+        );
     }
 
     #[test]
@@ -760,51 +623,6 @@ mod tests {
         );
         assert_eq!(cuboid.volume(), u64::MAX);
         assert_eq!(cuboid.wall_volume(), u64::MAX);
-    }
-
-    #[test]
-    fn move_cells_preserve_overlapping_source_snapshot() {
-        let positions = vec![pos(0, 0, 0), pos(1, 0, 0)];
-        let mut snapshots = HashMap::new();
-        snapshots.insert(
-            pos(0, 0, 0),
-            BlockSnapshot {
-                state: 10,
-                block_entity: None,
-            },
-        );
-        snapshots.insert(
-            pos(1, 0, 0),
-            BlockSnapshot {
-                state: 11,
-                block_entity: None,
-            },
-        );
-        snapshots.insert(
-            pos(2, 0, 0),
-            BlockSnapshot {
-                state: 12,
-                block_entity: None,
-            },
-        );
-
-        let move_state = MoveState {
-            positions,
-            offset: pos(1, 0, 0),
-            snapshots,
-            cells: Vec::new(),
-            phase: MovePhase::Snapshot,
-            next_index: 0,
-        };
-        let cells = build_move_cells(&move_state);
-        let result: HashMap<_, _> = cells
-            .into_iter()
-            .map(|cell| (cell.pos, cell.new.state))
-            .collect();
-
-        assert_eq!(result.get(&pos(0, 0, 0)), Some(&0));
-        assert_eq!(result.get(&pos(1, 0, 0)), Some(&10));
-        assert_eq!(result.get(&pos(2, 0, 0)), Some(&11));
     }
 
     fn pos(x: i32, y: i32, z: i32) -> BlockPos {

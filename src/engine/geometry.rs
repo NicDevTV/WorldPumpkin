@@ -12,11 +12,19 @@ pub struct BlockPos {
 
 impl BlockPos {
     /// Adds an offset to each coordinate, returning `None` if any coordinate overflows.
-    pub(super) fn checked_offset(self, offset: Self) -> Option<Self> {
+    pub(crate) fn checked_offset(self, offset: Self) -> Option<Self> {
         Some(Self {
             x: self.x.checked_add(offset.x)?,
             y: self.y.checked_add(offset.y)?,
             z: self.z.checked_add(offset.z)?,
+        })
+    }
+
+    pub(super) fn checked_sub(self, offset: Self) -> Option<Self> {
+        Some(Self {
+            x: self.x.checked_sub(offset.x)?,
+            y: self.y.checked_sub(offset.y)?,
+            z: self.z.checked_sub(offset.z)?,
         })
     }
 }
@@ -63,6 +71,14 @@ pub struct Cuboid {
 }
 
 impl Cuboid {
+    pub(super) fn contains(self, pos: BlockPos) -> bool {
+        pos.x >= self.min.x
+            && pos.x <= self.max.x
+            && pos.y >= self.min.y
+            && pos.y <= self.max.y
+            && pos.z >= self.min.z
+            && pos.z <= self.max.z
+    }
     /// Normalizes two corners into an inclusive cuboid with ordered bounds on every axis.
     pub fn new(a: BlockPos, b: BlockPos) -> Self {
         Self {
@@ -104,34 +120,21 @@ impl Cuboid {
         }
     }
 
-    /// Collects unique positions on the vertical faces, including degenerate one-block widths.
-    pub fn wall_positions(self) -> Vec<BlockPos> {
-        let mut positions = Vec::new();
-        for y in self.min.y..=self.max.y {
-            for z in self.min.z..=self.max.z {
-                if z == self.min.z || z == self.max.z {
-                    positions.extend((self.min.x..=self.max.x).map(|x| BlockPos { x, y, z }));
-                } else {
-                    positions.push(BlockPos {
-                        x: self.min.x,
-                        y,
-                        z,
-                    });
-                    if self.min.x != self.max.x {
-                        positions.push(BlockPos {
-                            x: self.max.x,
-                            y,
-                            z,
-                        });
-                    }
-                }
-            }
+    /// Iterates vertical faces without allocating a list of wall positions.
+    pub fn walls(self) -> WallIter {
+        WallIter {
+            cuboid: self,
+            next: Some(self.min),
         }
-        positions
+    }
+
+    #[cfg(test)]
+    pub fn wall_positions(self) -> Vec<BlockPos> {
+        self.walls().collect()
     }
 
     /// Returns the inclusive X, Y, and Z lengths using widened coordinate arithmetic.
-    fn dimensions(self) -> [u64; 3] {
+    pub fn dimensions(self) -> [u64; 3] {
         [
             (i64::from(self.max.x) - i64::from(self.min.x) + 1) as u64,
             (i64::from(self.max.y) - i64::from(self.min.y) + 1) as u64,
@@ -145,6 +148,47 @@ impl Cuboid {
             min: self.min.checked_offset(offset)?,
             max: self.max.checked_offset(offset)?,
         })
+    }
+}
+
+pub struct WallIter {
+    cuboid: Cuboid,
+    next: Option<BlockPos>,
+}
+
+impl Iterator for WallIter {
+    type Item = BlockPos;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let current = self.next?;
+        let min = self.cuboid.min;
+        let max = self.cuboid.max;
+        self.next = if current.x < max.x && (current.z == min.z || current.z == max.z) {
+            Some(BlockPos {
+                x: current.x + 1,
+                ..current
+            })
+        } else if current.x < max.x {
+            Some(BlockPos {
+                x: max.x,
+                ..current
+            })
+        } else if current.z < max.z {
+            Some(BlockPos {
+                x: min.x,
+                z: current.z + 1,
+                ..current
+            })
+        } else if current.y < max.y {
+            Some(BlockPos {
+                x: min.x,
+                y: current.y + 1,
+                z: min.z,
+            })
+        } else {
+            None
+        };
+        Some(current)
     }
 }
 
@@ -187,4 +231,56 @@ fn advance_position(cuboid: Cuboid, current: BlockPos) -> Option<BlockPos> {
         });
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashSet;
+
+    #[test]
+    fn wall_iterator_matches_geometric_boundary_for_thin_and_regular_cuboids() {
+        for x in 1..=5 {
+            for y in 1..=4 {
+                for z in 1..=5 {
+                    let min = BlockPos {
+                        x: -3,
+                        y: -2,
+                        z: -4,
+                    };
+                    let max = BlockPos {
+                        x: min.x + x - 1,
+                        y: min.y + y - 1,
+                        z: min.z + z - 1,
+                    };
+                    let cuboid = Cuboid::new(max, min);
+                    let expected: HashSet<_> = cuboid
+                        .iter()
+                        .filter(|p| p.x == min.x || p.x == max.x || p.z == min.z || p.z == max.z)
+                        .collect();
+                    let actual: Vec<_> = cuboid.walls().collect();
+                    assert_eq!(actual.len() as u64, cuboid.wall_volume());
+                    assert_eq!(actual.iter().copied().collect::<HashSet<_>>(), expected);
+                    assert_eq!(actual.len(), expected.len());
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn wall_iterator_handles_maximum_coordinates_without_overflow() {
+        let cuboid = Cuboid::new(
+            BlockPos {
+                x: i32::MAX - 1,
+                y: i32::MAX,
+                z: i32::MAX - 1,
+            },
+            BlockPos {
+                x: i32::MAX,
+                y: i32::MAX,
+                z: i32::MAX,
+            },
+        );
+        assert_eq!(cuboid.walls().count(), 4);
+    }
 }
